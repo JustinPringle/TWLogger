@@ -1,0 +1,8 @@
+ Low Power Inertial Movement Datalogger for Feather M0 Adalogger 
+ Version 2.4 
+ Samples Temp, Accel, Mag
+ Logs to CSV, flushing data after SamplesPerCycle samples
+ Internal RTC used to timestamp sensor data
+ Utilizes ReTick to Save Power (Sleeps during Idle time)
+ Restarts logging if reset (time sync is lost)
+ RED LED blinks once per minute for a low consumption pulse
