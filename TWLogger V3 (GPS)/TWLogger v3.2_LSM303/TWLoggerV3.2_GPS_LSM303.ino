@@ -2,7 +2,7 @@
  Author: James Fahlbusch
  
  Low Power Inertial Movement Datalogger for Feather M0 Adalogger 
- Version 3.1.1
+ Version 3.2
  Samples Temp, Accel, Mag, and GPS
  Logs to CSV, flushing data after SamplesPerCycle samples
  Internal RTC used to timestamp sensor data
@@ -12,15 +12,20 @@
  RED LED blinks once per minute for a low consumption pulse
  
  Connections (USES I2C and UART)
- Note: M0 to LSm303|UltimateGPS
+ Feather M0 to LSm303
  ===========
- Connect Pin 24 to SCL
- Connect Pin 22 to SDOG and SDOXM (MISO)
- Connect Pin 23 to SDA (MOSI)
- Connect Pin 10 to CSXM
- Connect Pin 09 to CSG
+ Connect Pin 24 (SCL) to SCL
+ Connect Pin 23 (SDA) to SDA
  Connect 3V to VIN
  Connect GND to GND
+ Feather M0 to UltimateGPS
+ ===========
+ Connect Pin 12 to En (Enable Pin)
+ Connect TX to RX
+ Connect RX to TX
+ Connect 3V to VIN
+ Connect GND to GND
+ Connect 3V to VBAT
 
  Version Notes:
  Added Logfile Timestamps 1/15/17
@@ -32,45 +37,29 @@
  Added reset timeout for tag restart 11/3/17
  Added GPS functionality 6/4/18 
  Added GPS control Options 6/29/18
+ Added Log Chip Serial and samplingRate Options 7/25/18
+ Changed Flush and File creation to ensure more regular sampling 8/7/2018
 
  Power Consumption: 
- 500mAh Battery - 27hours with Gyro, 39hours without Gyro
+ 500mAh Battery - ~39hrs @ 5min GPS, ~32hrs @ 2min GPS, ~26 hhrs @ 1min (50Hz ACC/Mag)
+ 
 */
 
 // ToDo~!!
+// Check if AdafruitSensor and be removed
 // Sensitivity testing of variables like timeout, number of samples to collect, MS smart delay
-// Reduce the wait time for time check
-// add 2 digit hour
-
-#include <RTCZero.h> 
-//#include <SPI.h>
-#include <SdFat.h>
-SdFat SD;
-#include <Wire.h>
-#include <Adafruit_Sensor.h>     //General sensor library for Adafruit
-#include <TW_LSM303.h> //library for Accel Mag Sensor LSM 303
-#include <TinyGPS.h>
-//Libraries for ReTick
-#include "Arduino.h"
-#include "retick.h"
+// Can I correct for slight drift in the sampling rate by changing where the time is checked
+// Retick running at 20ms is actually taking 20.xxx milliseconds, which results in a sample to be missed once every 20 seconds
 
 
 //////////////// Key Settings /////////////////////////////////
-#define vers "Version 3.1.1"
-//#define ECHO_TO_SERIAL // Allows serial output if uncommented
-//#define GPSECHO  true // Echo the GPS data to the Serial console
-//#define Gyro_On // Allows Gyro output if uncommented
-
-// Number of samples to buffer before uSD card flush is called. 
-#define SamplesPerCycle 2000
-// Number of lines of data per file
-// Should be divisible by SamplesPerCycle value
-#define SamplesPerFile 500000
-// Retick Cycle Rate to adjust sampling rate will inplement as user selectable
-// 40ms = 25Hz
-// 20ms = 50Hz
-// 10ms = 100Hz
-#define retickRate 20
+#define vers "Version 3.2"
+//#define ECHO_TO_SERIAL       // Allows serial output if uncommented
+//#define GPSECHO  true        // Echo the GPS data to the Serial console
+//#define Gyro_On              // Allows Gyro output if uncommented
+#define MinutesPerCycle 1      // Number of Minutes to buffer before uSD card flush is called. 
+#define HoursPerFile 5         // Number of Hours of data per file
+#define retickRate 20          // Default sampling rate of 50Hz
 #define Serial_Timeout  300000 // Wait time in menu before starting tag (5 min)
 // GPS Settings
 #define GPS_TIMEOUT         60 // Seconds to wait for a fix to be logged before sleeping
@@ -78,6 +67,18 @@ SdFat SD;
 #define GPS_DELAY_READ       8 // Seconds to wait before trying to log - allows for a fix
 #define LOOP_MAX_VAL         1 // Number of GPS reads before sleeping
 #define SMART_DELAY_MS      10 // Number of milliseconds to spend encoding GPS data between other instructions
+
+//////////////// Libraries //////////////////////
+#include <RTCZero.h> 
+#include <SdFat.h>
+SdFat SD;
+#include <Wire.h>
+#include <Adafruit_Sensor.h>   //General sensor library for Adafruit
+#include <TW_LSM303.h>         //library for Accel Mag Sensor LSM 303
+#include <TinyGPS.h>
+//Libraries for ReTick
+#include "Arduino.h"
+#include "retick.h"
 
 //////////////// GPS Seentences ///////////////////////////////
 // GPS Setup Sentences
@@ -90,39 +91,29 @@ SdFat SD;
 // turn on GPRMC and GGA
 #define PMTK_SET_NMEA_OUTPUT_RMCGGA "$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28"
 #define PGCMD_NOANTENNA "$PGCMD,33,0*6D" 
-///////////////////////////////////////////////////////////////
-
 
 /////////////// Global Objects ////////////////////
-
 #define GPSSerial Serial1
-// Connect to the GPS on the hardware port
 TinyGPS GPS;
 bool gpsStandby = false;
 unsigned int gpscount = 0;
 bool endGPSRead = false;
 bool logGPS = false; 
-// Seconds of GPS sleep between data acquisition
-unsigned short gpsRate = GPS_SAMPLING_RATE; // Default Value
- // Seconds to wait for a fix to be logged before sleeping
-unsigned short gpsTimeOut = GPS_TIMEOUT; // Default Value
-// Seconds to wait before trying to log - allows for a fix
-unsigned short gpsDelay = GPS_DELAY_READ;   // Default Value
-// Number of GPS reads before sleeping
-byte loopMaxGPS = LOOP_MAX_VAL; // Default Value
-// Number of milliseconds to spend encoding GPS data between other instructions
-byte smartDelayMS = SMART_DELAY_MS;  // Default Value
-unsigned int  loopCounter  = 0;        // Loop counter
+unsigned short gpsRate = GPS_SAMPLING_RATE; // Seconds of GPS sleep between data acquisition
+unsigned short gpsTimeOut = GPS_TIMEOUT;    // Seconds to wait for a fix to be logged before sleeping
+unsigned short gpsDelay = GPS_DELAY_READ;   // Seconds to wait before trying to log - allows for a fix
+byte loopMaxGPS = LOOP_MAX_VAL;             // Number of GPS reads before sleeping
+byte smartDelayMS = SMART_DELAY_MS;         // Number of milliseconds to spend encoding GPS data between other instructions
+unsigned int  loopCounter  = 0;             // Loop counter
 unsigned int readCount = 0;
 unsigned int hzGPSLog = 0;
-char          inByte       = 0;        // incoming serial byte
-String        reading      = "";       // String to hold current reading being created
+char          inByte       = 0;             // Incoming serial byte
+String        reading      = "";            // String to hold current reading being created
 //Intialize GPS variables
 unsigned short sentences = 0, failed = 0;
 long lat, lon, altitude;
 unsigned long fixage, age, dateUTC, timeUTC, chars = 0;
 unsigned long course, speed, sats, hdop;
-
 
 TW_LSM303 lsm = TW_LSM303(); // Initialize the IMU
 
@@ -138,7 +129,6 @@ TW_LSM303 lsm = TW_LSM303(); // Initialize the IMU
   #define Serial SERIAL_PORT_USBVIRTUAL
 #endif
 
-//not sure if this is necessary since you can set the clock using a gps
 char s_month[5];
 int tmonth, tday, tyear, thour, tminute, tsecond; 
 static const char month_names[] = "JanFebMarAprMayJunJulAugSepOctNovDec"; 
@@ -160,6 +150,7 @@ unsigned short delayStart = 0;
 unsigned int timekeeper = 0;
 // Variable to store the tag number
 byte tag = 0;
+byte samplingRate = retickRate; // set sampling rate to default (50Hz)
 
 RTCZero rtc;          // Create RTC object
 File logfile;         // Create file object
@@ -310,80 +301,17 @@ void setup() {
 
 /////////////////////   Loop    //////////////////////
 void loop() {
-  /*  Each run-through of tick will be 20ms (50Hz)
-   *  If it takes less than 20ms, the CPU will sleep
+  /*  Each run-through of tick will be samplingRate (default 20ms or 50Hz)
+   *  If it takes less than samplingRate, the CPU will sleep
    *  If it takes more, it immediately goes into next 
    *  tick once the previous finishes
    */
-  retick(retickRate);
+  retick(samplingRate);
 }
 
 /////////////////////   ReTick    //////////////////////
 void tick() {
-  //GPS Sampling Rate
-  if(gpscount >= gpsTimeOut && !gpsStandby){
-    #ifdef GPSECHO
-      Serial.println("sleeping");
-      Serial.print(hours);
-      Serial.print(":");
-      if(minutes < 10)
-        Serial.print('0'); // add leading zero for formatting
-      Serial.print(minutes);
-      Serial.print(":");
-      if(seconds < 10)
-        Serial.print('0'); // add leading zero for formatting
-      Serial.print(seconds); Serial.println();
-    #endif
-    //Disable the GPS
-    digitalWrite(12, LOW);
-    gpsStandby = true;
-    //gpsStandby = GPS.standby();
-    gpscount = 0; // reset counter
-  }
-  else if (gpscount>=gpsRate && gpsStandby) {
-    #ifdef GPSECHO
-      Serial.println("waking up");
-      Serial.print(hours);
-      Serial.print(":");
-      if(minutes < 10)
-        Serial.print('0'); // add leading zero for formatting
-      Serial.print(minutes);
-      Serial.print(":");
-      if(seconds < 10)
-        Serial.print('0'); // add leading zero for formatting
-      Serial.print(seconds); Serial.println();
-    #endif
-    //enable the GPS
-    digitalWrite(12, HIGH);
-    gpsStandby = false;
-    //gpsStandby = GPS.wakeup();
-    gpscount = 0; // reset counter
-  }
-  
-  CurrentCycleCount += 1;       //  Increment samples in current uSD flush cycle
-  CurrentFileCount += 1;        //  Increment samples in current file
-  WriteToSD();                  // Output to uSD card stream, will not actually be written due to buffer/page size
-  // Code to increment files limiting number of lines in each hence size, close the open file first.
-  if( CurrentFileCount >= SamplesPerFile ) {
-    if (logfile.isOpen()) {
-      logfile.close();
-    }
-    CreateFile();
-    //reset both counters
-    CurrentFileCount = 0;
-    CurrentCycleCount = 0;
-    #ifdef ECHO_TO_SERIAL
-      Serial.println("New log file created: ");
-      Serial.println(filename); 
-    #endif
-  }
-  //  Code to limit the number of power hungry writes to the uSD
-  //  Don't sync too often - requires 2048 bytes of I/O to SD card. 512 bytes of I/O if using Fat16 library
-  //  But this code forces it to sync at a fixd interval, i.e. once per hour etc depending on what is set
-  if( CurrentCycleCount >= SamplesPerCycle ) { 
-    logfile.flush(); // this takes about 16 milliseconds and hungrily uses power
-    CurrentCycleCount = 0;
-  }
+  WriteToSD();   // Output to uSD card stream, will not actually be written due to buffer/page size  
 }
 
 ///////////////   Functions   //////////////////
@@ -483,7 +411,69 @@ void writeHeader() {
 }
 
 // Print data and time followed by battery voltage to SD card
-void WriteToSD() {
+void WriteToSD() { 
+  timekeeper = rtc.getSeconds(); // Check the time   
+  tmstmp = millis();             //Get a time stamp for the data
+  if(seconds != timekeeper) {
+    gpscount += 1;               //increment the count at 1Hz     
+    if(gpscount >= gpsTimeOut && !gpsStandby){ 
+      #ifdef GPSECHO
+        Serial.println("sleeping");
+      #endif    
+      digitalWrite(12, LOW);     //Disable the GPS
+      gpsStandby = true;         // GPS is Asleep
+      gpscount = 0;              // reset counter
+    }else if (gpscount>=gpsRate && gpsStandby) {  
+      #ifdef GPSECHO
+        Serial.println("waking up");
+      #endif
+      digitalWrite(12, HIGH);    // Enable the GPS
+      gpsStandby = false;        // GPS is Awake
+      gpscount = 0;              // Reset counter
+    }
+    seconds = timekeeper;
+    // NOTE: Temp values are raw and uncalibrated
+    // temperature = 21.0 + (float)temperature/8; (21.0 is a guess)
+    lsm.readTemp();              //read the temp sensor at 1Hz
+    if(seconds == 0){    
+      digitalWrite(RED, HIGH);   //pulse once per minute
+      minutes = rtc.getMinutes();
+      CurrentCycleCount += 1;    //  Increment minute count in current uSD flush cycle
+      //  Limit the number of power hungry writes to the uSD
+      if( CurrentCycleCount >= MinutesPerCycle ) { 
+        logfile.flush(); // this takes about 16 milliseconds and hungrily uses power
+        CurrentCycleCount = 0;
+      }
+      if(minutes == 0){
+        hours = rtc.getHours();
+        CurrentFileCount += 1;   //  Increment Hour count in current file
+        // Limit the number of lines per file
+        if( CurrentFileCount >= HoursPerFile ) {
+          if (logfile.isOpen()) {
+            logfile.close();
+          }
+          CreateFile();
+          //reset both counters
+          CurrentFileCount = 0;
+          CurrentCycleCount = 0;
+          #ifdef ECHO_TO_SERIAL
+           Serial.println("New log file created: ");
+           Serial.println(filename); 
+          #endif
+        }
+        if(hours == 0){
+          day = rtc.getDay();
+          if(day == 1){
+            month = rtc.getMonth();
+            if(month == 1){
+              year = rtc.getYear();
+            }
+          }
+        } 
+      }
+      digitalWrite(RED, LOW);
+    }
+  }
   /* Read all the sensors. */
   /*   These are Raw values, Calculated values can be obtained by:
    *   event->acceleration.x = accelData.x * _accel_mg_lsb;
@@ -501,37 +491,8 @@ void WriteToSD() {
   /*   These are Raw values, Calculated values can be obtained by:
    *   event->gyro.x = gyroData.x * _gyro_dps_digit;
    */ 
-    lsm.readGyro();
+  lsm.readGyro();
   #endif
-  //Get a time stamp for the data
-  tmstmp = millis();    
-  timekeeper = rtc.getSeconds();
-  if(seconds != timekeeper) {
-    gpscount += 1; //increment the count at 1Hz
-    seconds = timekeeper;
-    // NOTE: Temp values are raw and uncalibrated
-    //temperature = 21.0 + (float)temperature/8; (21.0 is a guess)
-    //this is sampling at same rate as magnetometerr (make sure it is continuous)
-    lsm.readTemp(); //read the temp sensor at 1Hz
-    if(seconds == 0){ 
-      minutes = rtc.getMinutes();
-      //pulse once per minute
-      digitalWrite(RED, HIGH); 
-      if(minutes == 0){
-        hours = rtc.getHours();
-        if(hours == 0){
-          day = rtc.getDay();
-          if(day == 1){
-            month = rtc.getMonth();
-            if(month == 1){
-              year = rtc.getYear();
-            }
-          }
-        } 
-      }
-      digitalWrite(RED, LOW);
-    }
-  }
   
   if(!gpsStandby && gpscount > gpsDelay){ // wait whole seconds before logging  
     reading = ""; // reset reading
@@ -585,7 +546,6 @@ void WriteToSD() {
   logfile.print(tmstmp); logfile.print(",");
   // print Temperature data to the log file:
   logfile.print(lsm.temperature); logfile.print(",");
- 
   // print accelleration data to the log file: 
   logfile.print(lsm.accelData.x); logfile.print(",");
   logfile.print(lsm.accelData.y); logfile.print(",");
@@ -614,7 +574,7 @@ void WriteToSD() {
     logGPS = false; //reset
     reading = ""; // reset reading
     readCount++;  // increment the count
-    if(readCount == loopMaxGPS){  // Stop logging and put GPS to Sleep
+    if(readCount >= loopMaxGPS){  // Stop logging and put GPS to Sleep     
       gpscount = gpsTimeOut;       // Put the GPS to sleep
       readCount = 0;                // Reset the count of GPS log events
       hzGPSLog = 0;                 // Reset the 1 hz counter
@@ -624,7 +584,7 @@ void WriteToSD() {
     
   }
   // if no reading, move on to next line and compensate commas for no GPS data
-  else logfile.println(",,,,,,,,,,,");
+  else logfile.println(",,,,,,,,,");
 
   #ifdef ECHO_TO_SERIAL
     SerialOutput();    // Only logs to serial if ECHO_TO_SERIAL is uncommented at start of code
@@ -726,6 +686,18 @@ void writeDeploymentDetails(void)
   settingsFile.println();
   settingsFile.print("Tag Number: ");
   settingsFile.println(tag);
+  // This reads the chip serial number, which is unique to every SAMD21
+  volatile uint32_t val1, val2, val3, val4;
+  volatile uint32_t *ptr1 = (volatile uint32_t *)0x0080A00C;
+  val1 = *ptr1;
+  volatile uint32_t *ptr = (volatile uint32_t *)0x0080A040;
+  val2 = *ptr; ptr++;
+  val3 = *ptr; ptr++;
+  val4 = *ptr;
+  settingsFile.print("Tag Serial: 0x");
+  char buf[33];
+  sprintf(buf, "%8x%8x%8x%8x", val1, val2, val3, val4);
+  settingsFile.println(buf);
   settingsFile.println();
   settingsFile.print("Initiation Timestamp: ");
   settingsFile.print(month);
@@ -749,13 +721,13 @@ void writeDeploymentDetails(void)
   settingsFile.println(); 
   //Add sampling Rate
   settingsFile.println(F("----------Key Settings----------"));
-  settingsFile.print("Number of Samples before Flush() is called: "); // at an if to display the proper sampling rates
-  settingsFile.println(SamplesPerCycle);
-  settingsFile.print("Number of Samples per CSV file: "); // at an if to display the proper sampling rates
-  settingsFile.println(SamplesPerFile);
-  settingsFile.println("Sampling Rate: 50Hz");
+  settingsFile.print("Number of Minutes before Flush() is called: "); 
+  settingsFile.println(MinutesPerCycle);
+  settingsFile.print("Number of Hours of Sampling per CSV file: "); 
+  settingsFile.println(HoursPerFile);
+  settingsFile.print("ACC/MAG Sampling Rate: "); settingsFile.print(1000/samplingRate); settingsFile.println("Hz");
   settingsFile.println();
-  settingsFile.println("GPS Settings:");
+  settingsFile.println(F("GPS Settings:"));
   settingsFile.print("GPS Sampling Rate (seconds): "); settingsFile.println(gpsRate);
   settingsFile.print("GPS Timeout (seconds): "); settingsFile.println(gpsTimeOut);
   settingsFile.print("GPS Read Delay (seconds): "); settingsFile.println(gpsDelay);
@@ -820,10 +792,10 @@ void printMenu()
   Serial.println();
   Serial.println();
   Serial.println(F("1) Enter Tag Number"));
-  Serial.println(F("2) Set Time (GMT)"));
+  Serial.println(F("2) Set Date and Time (GMT)"));
   Serial.println(F("3) Display Time"));
   Serial.println(F("4) Set Start Delay"));
-  Serial.println(F("5) Set Date (only if different from above)"));
+  Serial.println(F("5) Set Sampling Rate"));
   Serial.println(F("6) Set Local Timezone Offset"));
   Serial.println(F("7) Check GPS Fix"));
   Serial.println(F("8) Set GPS Parameters"));
@@ -848,7 +820,7 @@ void parseMenu(char c)
         setDelayStart();
       break;
     case '5':
-        setRTCDate();
+        setSamplingRate();
       break;
     case '6':
         setTZ();
@@ -965,35 +937,103 @@ void setTZ(void)
 
 /**************************************************************************/
 /*
-  This function allows the user to set the Date
+  This function allows the user to set the Sampling Rate
 */
 /**************************************************************************/
-void setRTCDate(void)
+void setSamplingRate(void)
 {
-    Serial.println("Set the Date:");
-    year = prompt("Year (YY)", 0, 99); // Get the year
-    month = prompt("Month", 1, 12); // Get the month
-    day = prompt("Day", 1, 31); // Get the day
-    rtc.setDate(day, month, year);
-    updateFileNames();
+    Serial.println("Set the ACC/MAG Sampling Rate:");
+    Serial.println(F("1) 5Hz"));
+    Serial.println(F("2) 10Hz"));
+    Serial.println(F("3) 25Hz"));
+    Serial.println(F("4) 40Hz"));    
+    Serial.println(F("5) 50Hz (Default)"));
+    //Serial.println(F("6) 100Hz"));// Not implemented in this version
+    byte rsp = prompt("Enter the number beside the Sampling Rate (1-5)", 1, 5);
+    switch (rsp)
+    {
+      case 1:
+        samplingRate = 200; Serial.println("Sampling Rate: 5Hz"); break;
+      case 2:
+        samplingRate = 100; Serial.println("Sampling Rate: 10Hz"); break;
+      case 3:
+        samplingRate = 40; Serial.println("Sampling Rate: 25Hz");break;
+      case 4:
+        samplingRate = 25; Serial.println("Sampling Rate: 40Hz");break;
+      case 5:
+        samplingRate = 20; Serial.println("Sampling Rate: 50Hz"); break;
+ //   case 6: // Not implemented in this version
+ //     samplingRate = 10; Serial.println("Sampling Rate: 100Hz"); break;
+      default:
+        samplingRate = 20; Serial.println("Sampling Rate: 50Hz");break;
+      break;
+    }
     Serial.println(); 
 }
 
 /**************************************************************************/
 /*
-  This function allows the user to sync the time to a GPS
+  This function allows the user to set the Date
+*/
+/**************************************************************************/
+void setRTCDate(void)
+{
+    Serial.println("Set the Date (GMT):");
+    bool setD = true;
+    byte resp = prompt("Year (YY)", 0, 99); // Get the year
+    if(resp >= 0 && resp <= 99){ year = resp; }
+    else {setD = false;}
+    resp = prompt("Month", 1, 12); // Get the month
+    if(resp >= 1 && resp <= 12) { month = resp; }
+    else {setD = false;}
+    resp = prompt("Day", 1, 31); // Get the day
+    if(resp >= 1 && resp <= 31) { day = resp; }
+    else {setD = false;}
+    if(setD){
+      rtc.setDate(day, month, year);
+      updateFileNames();
+    }
+    Serial.println("RTC Date set to:");
+    print2digits(rtc.getMonth());
+    Serial.print("/");
+    print2digits(rtc.getDay());
+    Serial.print("/20");
+    print2digits(rtc.getYear());
+    Serial.println();
+}
+
+/**************************************************************************/
+/*
+  This function allows the user to sync the date and time to a GPS
+  Should be in GMT
 */
 /**************************************************************************/
 void setRTCTime(void)
 {
+  Serial.println("RTC Date");
+  print2digits(rtc.getMonth());
+  Serial.print("/");
+  print2digits(rtc.getDay());
+  Serial.print("/20");
+  print2digits(rtc.getYear());
+  Serial.println();
+  Serial.println("Set the Date?");
+  byte i2 = prompt("0 = No, 1 = Yes", 0, 1); 
+  Serial.println();
+  if(i2 != 0){
+    setRTCDate();
+  } 
+  Serial.println(); 
   //Create a loop here to allow user to resync clock
   bool timeSet = false;
   while(!timeSet){
-    Serial.println("Set the Tag's Clock. Sync with a gps");
+    Serial.println("Set the Tag's Clock. Sync with a GPS");
+    Serial.println("Enter a time roughly a minute from now.");
+    Serial.println("You will then be prompted to sync at that exact time");    
     hours = prompt("Hour (0-23)", 0, 23); // Get the hour
-    minutes = prompt("Minute", 0, 59); // Get the minute
-    seconds = prompt("Second", 0, 59); // Get the second
-    Serial.println("Press any key to begin (spacebar, then enter)");
+    minutes = prompt("Minute (0-59)", 0, 59); // Get the minute
+    seconds = prompt("Second (0-59)", 0, 59); // Get the second
+    Serial.println("Press any key to sync (spacebar, then enter)");
     while (!Serial.available()) ; // Wait for keypress to start clock 
     rtc.begin();    // Start the RTC in 24hr mode
     rtc.setTime(hours, minutes, seconds); // Then set the time
@@ -1007,8 +1047,8 @@ void setRTCTime(void)
     print2digits(rtc.getSeconds());
     Serial.println();
     //Add clock display and allow user to reset
-    byte i2 = 0;
-    while(i2 < 6){
+    i2 = 0;
+    while(i2 < 8){
       timekeeper = rtc.getSeconds();
       if(seconds != timekeeper) {
         seconds = timekeeper;

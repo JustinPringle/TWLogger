@@ -36,17 +36,9 @@
  105mAh Battery - 7.3 hours
 */
 
-
-#include <RTCZero.h> 
-//#include <SPI.h>
-#include <SdFat.h>
-SdFat SD;
-#include <Wire.h>
-#include <Adafruit_Sensor.h>     //General sensor library for Adafruit
-#include <TW_LSM303.h> //library for Accel Mag Sensor LSM 303
-//Libraries for ReTick
-#include "Arduino.h"
-#include "retick.h"
+// Check if AdafruitSensor and be removed
+// Can I correct for slight drift in the sampling rate by changing where the time is checked
+// Retick running at 20ms is actually taking 20.xxx milliseconds, which results in a sample to be missed once every 20 seconds
 
 //////////////// Key Settings ///////////////////
 #define vers "Version 2.5"
@@ -59,8 +51,18 @@ SdFat SD;
 // Retick Cycle Rate to adjust sampling rate
 #define retickRate 20
 #define Serial_Timeout 300000 //Wait time in menu before starting tag
-///////////////////////////////////////////////////////////////
 
+//////////////// Libraries //////////////////////
+#include <RTCZero.h> 
+//#include <SPI.h>
+#include <SdFat.h>
+SdFat SD;
+#include <Wire.h>
+#include <Adafruit_Sensor.h>     //General sensor library for Adafruit
+#include <TW_LSM303.h> //library for Accel Mag Sensor LSM 303
+//Libraries for ReTick
+#include "Arduino.h"
+#include "retick.h"
 
 /////////////// Global Objects ////////////////////
 #define cardSelect 4  // Set the pin used for uSD
@@ -342,13 +344,10 @@ void WriteToSD() {
     // temperature = 21.0 + (float)temperature/8; (21.0 is a guess)
     lsm.readTemp(); //read the temp sensor at 1Hz
     if(seconds == 0){ 
+      digitalWrite(RED, HIGH);   // Pulse once per minute
       minutes = rtc.getMinutes();
-      //pulse once per minute
-      digitalWrite(RED, HIGH);
-      CurrentCycleCount += 1;  //  Increment minute count in current uSD flush cycle
+      CurrentCycleCount += 1;    // Increment minute count in current uSD flush cycle
       //  Code to limit the number of power hungry writes to the uSD
-      //  Don't sync too often - requires 2048 bytes of I/O to SD card. 512 bytes of I/O if using Fat16 library
-      //  But this code forces it to sync at a fixd interval, i.e. once per hour etc depending on what is set
       if( CurrentCycleCount >= MinutesPerCycle ) { 
         logfile.flush(); // this takes about 16 milliseconds and hungrily uses power
         CurrentCycleCount = 0;
@@ -413,6 +412,8 @@ void WriteToSD() {
   logfile.print("/20");
   logfile.print(year);
   logfile.print(",");
+  if(hours < 10)
+    logfile.print('0'); // add leading zero for formatting
   logfile.print(hours);
   logfile.print(":");
   if(minutes < 10)
@@ -449,7 +450,7 @@ void WriteToSD() {
 }
 
 
-// Debbugging output of time/date and battery voltage
+// Debugging output
 void SerialOutput() {
   if(month < 10)
     Serial.print('0'); // add leading zero for formatting
@@ -472,7 +473,7 @@ void SerialOutput() {
   Serial.print("     "); 
   Serial.println(tmstmp);
   Serial.print("TempRaw: "); Serial.print(lsm.temperature); Serial.print(" ");
-  Serial.print("Temp Adjusted: "); Serial.print(21.0 + (float)lsm.temperature/8); Serial.println(" *C");
+  Serial.print("Temp Adjusted: "); Serial.print(21.0000 + ((float)lsm.temperature+4)/8); Serial.println(" *C");
   Serial.print("AX: "); Serial.print(lsm.accelData.x); Serial.print(" ");
   Serial.print(" AY: "); Serial.print(lsm.accelData.y);       Serial.print(" ");
   Serial.print(" AZ: "); Serial.print(lsm.accelData.z);     Serial.println("  \tRAW Values");
