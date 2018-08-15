@@ -122,7 +122,7 @@ void TW_LSM303::readTemp() {
 
   valueL = read8(LSM303_ADDRESS_MAG, LSM303_REGISTER_MAG_TEMP_OUT_L_M);
   valueH = read8(LSM303_ADDRESS_MAG, LSM303_REGISTER_MAG_TEMP_OUT_H_M);
-  temperature = (int16_t)(( valueH << 8 | valueL ) >> 4 ); // Should this be an unsingned int?
+  temperature = (((int16_t)( valueH << 8 | valueL )) >> 4 );
 }
 
 void TW_LSM303::setMagGain(lsm303MagGain gain)
