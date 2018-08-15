@@ -416,21 +416,6 @@ void WriteToSD() {
   tmstmp = millis();             //Get a time stamp for the data
   if(seconds != timekeeper) {
     gpscount += 1;               //increment the count at 1Hz     
-    if(gpscount >= gpsTimeOut && !gpsStandby){ 
-      #ifdef GPSECHO
-        Serial.println("sleeping");
-      #endif    
-      digitalWrite(12, LOW);     //Disable the GPS
-      gpsStandby = true;         // GPS is Asleep
-      gpscount = 0;              // reset counter
-    }else if (gpscount>=gpsRate && gpsStandby) {  
-      #ifdef GPSECHO
-        Serial.println("waking up");
-      #endif
-      digitalWrite(12, HIGH);    // Enable the GPS
-      gpsStandby = false;        // GPS is Awake
-      gpscount = 0;              // Reset counter
-    }
     seconds = timekeeper;
     // NOTE: Temp values are raw and uncalibrated
     // temperature = 21.0 + (float)temperature/8; (21.0 is a guess)
@@ -494,20 +479,36 @@ void WriteToSD() {
   lsm.readGyro();
   #endif
   
-  if(!gpsStandby && gpscount > gpsDelay){ // wait whole seconds before logging  
-    reading = ""; // reset reading
-    smartdelay(smartDelayMS); // Do - While Loop to read and encode GPS
-    #ifdef GPSECHO 
+  if(gpsStandby) {  // GPS is most often in standby, so check that first
+    if(gpscount>=gpsRate){ // time to wake up  
+      #ifdef GPSECHO
+        Serial.println("waking up");
+      #endif
+      digitalWrite(12, HIGH);    // Enable the GPS
+      gpsStandby = false;        // GPS is Awake
+      gpscount = 0;              // Reset counter
+    }
+  }else { // GPS is running, so see if it is at timeout or time to log
+    if(gpscount >= gpsTimeOut){ 
+      #ifdef GPSECHO
+        Serial.println("sleeping");
+      #endif    
+      digitalWrite(12, LOW);     //Disable the GPS
+      gpsStandby = true;         // GPS is Asleep
+      gpscount = 0;              // reset counter
+    }else if(gpscount > gpsDelay){ // wait whole seconds before logging  
+      reading = ""; // reset reading
+      smartdelay(smartDelayMS); // Do - While Loop to read and encode GPS
+      #ifdef GPSECHO 
         GPS.stats(&chars, &sentences, &failed);
         Serial.println(chars);
         Serial.println(sentences);
         Serial.println(failed);
-    #endif
-    GPS.get_position(&lat, &lon, &fixage);  // lat/long in MILLIONTHs of a degree and age of fix in milliseconds    
-    sats = GPS.satellites(); //make sure valid satellites before logging
-    
-    // ensure that there are valid satellites, 1 hz logging and a recent position (within 10 Seconds)
-    if(sats != 255 && hzGPSLog != gpscount && fixage < 10000){
+      #endif
+      GPS.get_position(&lat, &lon, &fixage);  // lat/long in MILLIONTHs of a degree and age of fix in milliseconds    
+      sats = GPS.satellites(); //make sure valid satellites before logging 
+      // ensure that there are valid satellites, 1 hz logging and a recent position (within 10 Seconds)
+      if(sats != 255 && hzGPSLog != gpscount && fixage < 10000){
         logGPS = true; // starts as true, if invalid is found, set to false
         log_int(sats, TinyGPS::GPS_INVALID_SATELLITES, 5);
         log_int(GPS.hdop(), TinyGPS::GPS_INVALID_HDOP, 5);
@@ -518,8 +519,8 @@ void WriteToSD() {
         log_int(GPS.altitude(), TinyGPS::GPS_INVALID_ALTITUDE, 7);
         log_int(GPS.course(), TinyGPS::GPS_INVALID_ANGLE, 7);
         log_int(GPS.speed(), TinyGPS::GPS_INVALID_SPEED, 6);     
+      }
     }
-      
   }
   //RTC Uses DD MM YYYY HH MM SS, so epoch results in extra math
  // Formatting for file output mm/dd/yyyy, hh:mm:ss 
