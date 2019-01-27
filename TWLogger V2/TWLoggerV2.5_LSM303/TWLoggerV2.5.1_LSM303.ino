@@ -2,7 +2,7 @@
  Author: James Fahlbusch
  
  Low Power Inertial Movement Datalogger for Feather M0 Adalogger 
- Version 2.5 
+ Version 2.5.1 
  Samples Temp, Accel, Mag
  Logs to CSV, flushing data after MinutesPerCycle samples
  Internal RTC used to timestamp sensor data
@@ -29,6 +29,7 @@
  Added reset timeout for tag restart 11/3/17
  Added Log Chip Serial and samplingRate Options 7/25/18
  Changed Flush and File creation to ensure more regular sampling 8/7/2018
+ Changed File Naming for 2 digit tag numbers 1/26/2019
 
  Power Consumption: 
  500mAh Battery - 39h hours 
@@ -41,7 +42,7 @@
 // Retick running at 20ms is actually taking 20.xxx milliseconds, which results in a sample to be missed once every 20 seconds
 
 //////////////// Key Settings ///////////////////
-#define vers "Version 2.5"
+#define vers "Version 2.5.1"
 //#define ECHO_TO_SERIAL // Allows serial output if uncommented
 //#define Gyro_On // Allows Gyro output if uncommented
 // Number of Minutes to buffer before uSD card flush is called. 
@@ -99,7 +100,7 @@ byte delayStart = 0;
 // Limits the number of calls to RTC
 unsigned int timekeeper = 0;
 // Variable to store the tag number
-byte tag = 0;
+uint8_t tag = 0;
 byte samplingRate = retickRate; // set sampling rate to default (50Hz)
 
 /////////////// Global Objects ////////////////////
@@ -115,8 +116,8 @@ char tzOffset[] = "+00";    // Array to store Timezone Offset, stored in info fi
 
 //////////////    Setup   ///////////////////
 void setup() {  
-  strcpy(filename, "T0D0101-00.CSV");   // Template for log file name, characters 8 & 9 get set automatically later
-  strcpy(settingsFilename, "T0S0101-00.TXT");   // Template for settings file name, characters 8 & 9 will be used if other deployments are on the same card.
+  strcpy(filename, "D000101-00.CSV");   // Template for log file name, characters 2 & 3 (Tag#), 8 & 9 (LogFile#) get set automatically later
+  strcpy(settingsFilename, "S000101-00.TXT");   // Template for settings file name, characters 2 & 3 (Tag#), 8 & 9  (SettingsFile#) will be used if other deployments are on the same card.
 
   Serial.begin(115200);
   tmstmp = millis(); //to store a timeout value
@@ -585,19 +586,6 @@ void writeDeploymentDetails(void)
   settingsFile.println(HoursPerFile);
   settingsFile.print("ACC/MAG Sampling Rate: "); settingsFile.print(1000/samplingRate); settingsFile.println("Hz");
   settingsFile.println();
-  /*
-  sensor_t accel, mag, gyro, temp;
-  lsm.getSensor(&accel, &mag, &gyro, &temp);
-  settingsFile.println("Sensor Details:");
-  settingsFile.println(F("--------------ACC---------------"));
-  settingsFile.print  (F("Sensor:       ")); settingsFile.println(accel.name);
-  settingsFile.println(F("--------------MAG---------------"));
-  settingsFile.print  (F("Sensor:       ")); settingsFile.println(mag.name);
-  #ifdef Gyro_On 
-  settingsFile.println(F("--------------GYRO--------------"));
-  settingsFile.print  (F("Sensor:       ")); settingsFile.println(gyro.name); 
-  #endif 
-  */
   settingsFile.println();
   settingsFile.println(F("Associated Log Files:"));
 
@@ -739,16 +727,20 @@ void setTagNum(void)
   bool tagSet = false;
   while(!tagSet){
     Serial.println("Set the Tag Number:");
-    byte rsp = prompt("Tag (1-9)", 1, 9);
-    if(rsp >= 1 && rsp < 10){
-    tag = rsp;
-    settingsFilename[1] = '0' + tag;
-    filename[1] = '0' + tag;
-    tagSet = true;
-    Serial.println();
-    Serial.print("Tag Number: ");
-    Serial.println(tag);
-    delay(2000);
+    byte rsp = prompt("Tag (1-99)", 1, 99);
+    if(rsp >= 1 && rsp < 100){ //make  sure it is a valid tag#
+      tag = rsp;
+      settingsFilename[1] = '0' + tag/10;  //S##0101-00.txt - get the tens digit
+      settingsFilename[2] = '0' + tag%10;  //S##0101-00.txt - get the ones digit
+      Serial.println(settingsFilename);
+      filename[1] = '0' + tag/10; //D0#0101-00.csv - get the tens digit
+      filename[2] = '0' + tag%10; //D0#0101-00.csv - get the ones digit
+      Serial.println(filename);    
+      tagSet = true;
+      Serial.println();
+      Serial.print("Tag Number: ");
+      Serial.println(tag);
+      delay(1500);
     }
   }
 }
