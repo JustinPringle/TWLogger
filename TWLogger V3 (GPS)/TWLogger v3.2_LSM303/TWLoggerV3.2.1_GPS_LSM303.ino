@@ -2,7 +2,7 @@
  Author: James Fahlbusch
  
  Low Power Inertial Movement Datalogger for Feather M0 Adalogger 
- Version 3.2
+ Version 3.2.1
  Samples Temp, Accel, Mag, and GPS
  Logs to CSV, flushing data after SamplesPerCycle samples
  Internal RTC used to timestamp sensor data
@@ -39,6 +39,7 @@
  Added GPS control Options 6/29/18
  Added Log Chip Serial and samplingRate Options 7/25/18
  Changed Flush and File creation to ensure more regular sampling 8/7/2018
+ Changed File Naming for 2 digit tag numbers 1/26/2019
 
  Power Consumption: 
  500mAh Battery - ~39hrs @ 5min GPS, ~32hrs @ 2min GPS, ~26 hhrs @ 1min (50Hz ACC/Mag)
@@ -53,7 +54,7 @@
 
 
 //////////////// Key Settings /////////////////////////////////
-#define vers "Version 3.2"
+#define vers "Version 3.2.1"
 //#define ECHO_TO_SERIAL       // Allows serial output if uncommented
 //#define GPSECHO  true        // Echo the GPS data to the Serial console
 //#define Gyro_On              // Allows Gyro output if uncommented
@@ -149,7 +150,7 @@ unsigned short delayStart = 0;
 // Limits the number of calls to RTC
 unsigned int timekeeper = 0;
 // Variable to store the tag number
-byte tag = 0;
+uint8_t tag = 0;
 byte samplingRate = retickRate; // set sampling rate to default (50Hz)
 
 RTCZero rtc;          // Create RTC object
@@ -164,8 +165,8 @@ char tzOffset[] = "+00";    // Array to store Timezone Offset, stored in info fi
 
 //////////////    Setup   ///////////////////
 void setup() {  
-  strcpy(filename, "T0D0101-00.CSV");   // Template for log file name, characters 8 & 9 get set automatically later
-  strcpy(settingsFilename, "T0S0101-00.TXT");   // Template for settings file name, characters 8 & 9 will be used if other deployments are on the same card.
+  strcpy(filename, "D000101-00.CSV");   // Template for log file name, characters 2 & 3 (Tag#), 8 & 9 (LogFile#) get set automatically later
+  strcpy(settingsFilename, "S000101-00.TXT");   // Template for settings file name, characters 2 & 3 (Tag#), 8 & 9  (SettingsFile#) will be used if other deployments are on the same card.
   //enable the GPS
   pinMode(gpsEnable, OUTPUT);
   digitalWrite(gpsEnable, HIGH);
@@ -754,10 +755,10 @@ void configureSensor(void)
   //lsm.write8(XMTYPE, LSM9DS0_REGISTER_CTRL_REG5_XM, 0b01110000); //turns off temp sensor
 
   // 1.) Set the accelerometer range
-  lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_2G);
+  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_2G);
   //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_4G);
   //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_6G);
-  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_8G);
+  lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_8G);
   //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_16G);
   
   // 2.) Set the magnetometer sensitivity
@@ -884,16 +885,20 @@ void setTagNum(void)
   bool tagSet = false;
   while(!tagSet){
     Serial.println("Set the Tag Number:");
-    byte rsp = prompt("Tag (1-9)", 1, 9);
-    if(rsp >= 1 && rsp < 10){
-    tag = rsp;
-    settingsFilename[1] = '0' + tag;
-    filename[1] = '0' + tag;
-    tagSet = true;
-    Serial.println();
-    Serial.print("Tag Number: ");
-    Serial.println(tag);
-    delay(1000);
+    byte rsp = prompt("Tag (1-99)", 1, 99);
+    if(rsp >= 1 && rsp < 100){ //make  sure it is a valid tag#
+      tag = rsp;
+      settingsFilename[1] = '0' + tag/10;  //S##0101-00.txt - get the tens digit
+      settingsFilename[2] = '0' + tag%10;  //S##0101-00.txt - get the ones digit
+      Serial.println(settingsFilename);
+      filename[1] = '0' + tag/10; //D0#0101-00.csv - get the tens digit
+      filename[2] = '0' + tag%10; //D0#0101-00.csv - get the ones digit
+      Serial.println(filename);    
+      tagSet = true;
+      Serial.println();
+      Serial.print("Tag Number: ");
+      Serial.println(tag);
+      delay(1500);
     }
   }
 }
