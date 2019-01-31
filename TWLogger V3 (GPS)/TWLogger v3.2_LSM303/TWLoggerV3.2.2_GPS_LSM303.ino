@@ -2,7 +2,7 @@
  Author: James Fahlbusch
  
  Low Power Inertial Movement Datalogger for Feather M0 Adalogger 
- Version 3.2.1
+ Version 3.2.2
  Samples Temp, Accel, Mag, and GPS
  Logs to CSV, flushing data after SamplesPerCycle samples
  Internal RTC used to timestamp sensor data
@@ -40,6 +40,7 @@
  Added Log Chip Serial and samplingRate Options 7/25/18
  Changed Flush and File creation to ensure more regular sampling 8/7/2018
  Changed File Naming for 2 digit tag numbers 1/26/2019
+ Added Plotter Output 1/31/19
 
  Power Consumption: 
  500mAh Battery - ~39hrs @ 5min GPS, ~32hrs @ 2min GPS, ~26 hhrs @ 1min (50Hz ACC/Mag)
@@ -54,8 +55,10 @@
 
 
 //////////////// Key Settings /////////////////////////////////
-#define vers "Version 3.2.1"
+#define vers "Version 3.2.2"
 //#define ECHO_TO_SERIAL       // Allows serial output if uncommented
+//#define ECHO_ACC_PLOTTER       // Serial output of just ACC for plotter display 
+//#define ECHO_MAG_PLOTTER     // Serial output of just ACC for plotter display
 //#define GPSECHO  true        // Echo the GPS data to the Serial console
 //#define Gyro_On              // Allows Gyro output if uncommented
 #define MinutesPerCycle 1      // Number of Minutes to buffer before uSD card flush is called. 
@@ -591,6 +594,12 @@ void WriteToSD() {
   #ifdef ECHO_TO_SERIAL
     SerialOutput();    // Only logs to serial if ECHO_TO_SERIAL is uncommented at start of code
   #endif
+  #ifdef ECHO_ACC_PLOTTER
+    PlotterOutput();    // Display Acc in plotter
+  #endif
+  #ifdef ECHO_MAG_PLOTTER
+    PlotterOutput();    // Display Mag in plotter
+  #endif  
 }
 
 
@@ -629,6 +638,16 @@ void SerialOutput() {
   Serial.print(" GY: "); Serial.print(lsm.gyroData.y);       Serial.print(" ");
   Serial.print(" GZ: "); Serial.print(lsm.gyroData.z);     Serial.println("  \tRAW Values");
   #endif
+}
+
+// Very simple display for plotter
+void PlotterOutput() {
+  #ifdef ECHO_ACC_PLOTTER
+    Serial.print(lsm.accelData.x); Serial.print(" "); Serial.print(lsm.accelData.y); Serial.print(" "); Serial.print(lsm.accelData.z); Serial.println();
+  #endif
+  #ifdef ECHO_MAG_PLOTTER
+    Serial.print(lsm.magData.x); Serial.print(" "); Serial.print(lsm.magData.y); Serial.print(" "); Serial.print(lsm.magData.z); Serial.println();
+  #endif 
 }
 
 //Probably not necessary since noone will see the error blinks
