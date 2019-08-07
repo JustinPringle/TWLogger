@@ -1,10 +1,9 @@
-**Supplemental Materials**
+# Supplemental Materials
 
-**Fahlbusch and Harrington 2019**
+## **Fahlbusch and Harrington 2019
+## Tapered Wings Logger (TWLogger) Build Instructions & Circuitry Diagram
 
-Tapered Wings Logger (TWLogger) Build Instructions & Circuitry Diagram
-
-**[Equipment]{.underline}**
+### [Equipment]
 
 Soldering iron
 
