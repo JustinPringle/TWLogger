@@ -28,7 +28,7 @@ height="2.3513888888888888in"}
 Fig. A1: Sample solder station and equipment. Note the blue rubber dish
 is the nonconductive safety pad upon which all soldering takes place.
 
-![Clamp Configuration](/media/image2.jpeg){width="4.178240376202974in"
+![Clamp Configuration](media/image2.jpg){width="4.178240376202974in"
 height="2.3502602799650045in"}
 
 Fig. A2: Example for how to configure clamps to hold circuit boards
@@ -155,7 +155,7 @@ c.  As of 24 June 2019, version to use is
 
 4.  Confirm computer recognizes and can communicate with TWLogger
 
-    d.  ![](media/image7.jpeg){width="5.768055555555556in"
+    d.  ![](media/image7.jpg){width="5.768055555555556in"
         height="3.092361111111111in"}Tools → Port → \[select COM port
         that lists Feather M0 as connected\] (Fig. B1)
 
@@ -166,13 +166,13 @@ e.  If Feather M0 isn't listed, try two options:
     i.  Confirm you properly followed Adafruit setup instructions (step
         1 above)
 
-    ii. ![](media/image8.jpeg){width="5.761111111111111in"
+    ii. ![](media/image8.jpg){width="5.761111111111111in"
         height="3.0875in"}After confirming proper setup, go to File →
         Examples → Basics → Blink (Fig. B2)
 
 > Fig. B2. Open Blink.
 
-iii. ![](media/image9.jpeg){width="5.788888888888889in"
+iii. ![](media/image9.jpg){width="5.788888888888889in"
     height="3.1055555555555556in"}Open Blink and click upload (on the
     toolbar below menu options, click the right-hand arrow that is 2^nd^
     icon from left) (Fig. B3)
@@ -192,7 +192,7 @@ v.  Now check if Feather M0 is listed as available on a COM port
     below menu options, click the right-hand arrow that is 2^nd^ icon
     from left) to upload TWLogger software.
 
-6.  ![](media/image10.jpeg){width="5.651388888888889in"
+6.  ![](media/image10.jpg){width="5.651388888888889in"
     height="3.0416666666666665in"}Immediately after progress bar says
     "Done Uploading" (bottom left, orange writing on black area of
     program screen), go to Tools → Serial Monitor (Fig. B4)
@@ -252,7 +252,7 @@ g.  for the parameter you would like to define, then press enter. When
 |                       |                       | the tag               |
 +-----------------------+-----------------------+-----------------------+
 
-![](media/image11.jpeg){width="5.660416666666666in"
+![](media/image11.jpg){width="5.660416666666666in"
 height="3.0347222222222223in"}Table B1. User-defined parameters
 available in the TWLogger setup state.
 
@@ -292,5 +292,5 @@ h.  To begin logging, enter parameter number 9 in the serial monitor
 > http://www.animaltags.org/doku.php?id=tagwiki:info:people
 
 2.  See
-    [http://github.com/Harrington-et-al/TWLogger](http://github.com/jamesfahlbusch/TWLogger/AnalysisToolkit)
+    [http://github.com/jamesfahlbusch/TWLogger](http://github.com/jamesfahlbusch/TWLogger/AnalysisToolkit)
     for documented analysis toolkit.
