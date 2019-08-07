@@ -22,7 +22,7 @@ Foam paper (e.g., craft supply store)
 
 Glue (e.g., clear liquid super glue)
 
-![Sample solder station and equipment](/media/image1.jpg){width="4.180247156605424in"
+![Sample solder station and equipment](media/image1.jpg){width="4.180247156605424in"
 height="2.3513888888888888in"}
 
 Fig. A1: Sample solder station and equipment. Note the blue rubber dish
