@@ -22,7 +22,7 @@ Foam paper (e.g., craft supply store)
 
 Glue (e.g., clear liquid super glue)
 
-![Sample solder station and equipment](/media/image1.jpeg){width="4.180247156605424in"
+![Sample solder station and equipment](/media/image1.jpg){width="4.180247156605424in"
 height="2.3513888888888888in"}
 
 Fig. A1: Sample solder station and equipment. Note the blue rubber dish
@@ -65,7 +65,7 @@ which they need to be soldered.
 
         iv. 3V: 3cm, 6cm
 
-    b.  ![](media/image3.tiff){width="3.209722222222222in"
+    b.  ![](/media/image3.tif){width="3.209722222222222in"
         height="3.0944444444444446in"}![](media/image4.tiff){width="2.5527777777777776in"
         height="3.104861111111111in"}Cut chafe guard from foam sheet and
         glue to back of Flora (Fig. A3B)
