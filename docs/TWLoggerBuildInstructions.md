@@ -22,14 +22,13 @@ Foam paper (e.g., craft supply store)
 
 Glue (e.g., clear liquid super glue)
 
-![A group of items on a table Description automatically
-generated](media/image1.jpeg){width="4.180247156605424in"
+![Sample solder station and equipment](/media/image1.jpeg){width="4.180247156605424in"
 height="2.3513888888888888in"}
 
 Fig. A1: Sample solder station and equipment. Note the blue rubber dish
 is the nonconductive safety pad upon which all soldering takes place.
 
-![](media/image2.jpeg){width="4.178240376202974in"
+![Clamp Configuration](/media/image2.jpeg){width="4.178240376202974in"
 height="2.3502602799650045in"}
 
 Fig. A2: Example for how to configure clamps to hold circuit boards
