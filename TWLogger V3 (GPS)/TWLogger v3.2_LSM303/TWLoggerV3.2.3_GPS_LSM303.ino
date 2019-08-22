@@ -2,7 +2,7 @@
  Author: James Fahlbusch
  
  Low Power Inertial Movement Datalogger for Feather M0 Adalogger 
- Version 3.2.2
+ Version 3.2.3
  Samples Temp, Accel, Mag, and GPS
  Logs to CSV, flushing data after SamplesPerCycle samples
  Internal RTC used to timestamp sensor data
@@ -41,6 +41,7 @@
  Changed Flush and File creation to ensure more regular sampling 8/7/2018
  Changed File Naming for 2 digit tag numbers 1/26/2019
  Added Plotter Output 1/31/19
+ Better GPS Error Checking 8/18/19
 
  Power Consumption: 
  500mAh Battery - ~39hrs @ 5min GPS, ~32hrs @ 2min GPS, ~26 hhrs @ 1min (50Hz ACC/Mag)
@@ -56,7 +57,7 @@
 
 //////////////// Key Settings /////////////////////////////////
 #define vers "Version 3.2.2"
-//#define ECHO_TO_SERIAL       // Allows serial output if uncommented
+#define ECHO_TO_SERIAL       // Allows serial output if uncommented
 //#define ECHO_ACC_PLOTTER       // Serial output of just ACC for plotter display 
 //#define ECHO_MAG_PLOTTER     // Serial output of just ACC for plotter display
 //#define GPSECHO  true        // Echo the GPS data to the Serial console
@@ -511,8 +512,8 @@ void WriteToSD() {
       #endif
       GPS.get_position(&lat, &lon, &fixage);  // lat/long in MILLIONTHs of a degree and age of fix in milliseconds    
       sats = GPS.satellites(); //make sure valid satellites before logging 
-      // ensure that there are valid satellites, 1 hz logging and a recent position (within 10 Seconds)
-      if(sats != 255 && hzGPSLog != gpscount && fixage < 10000){
+      // ensure that there are valid satellites (>2, <99), 1 hz logging, a recent position (within 10 Seconds, and lat/lon not zero
+      if(sats > 2 && sats < 99 && hzGPSLog != gpscount && fixage < 10000 && lat != 0 && lon != 0){
         logGPS = true; // starts as true, if invalid is found, set to false
         log_int(sats, TinyGPS::GPS_INVALID_SATELLITES, 5);
         log_int(GPS.hdop(), TinyGPS::GPS_INVALID_HDOP, 5);
@@ -1416,7 +1417,8 @@ static void log_date(TinyGPS &gps)
   byte monthGPS, dayGPS, hourGPS, minuteGPS, secondGPS, hundredthsGPS;
   unsigned long age;
   GPS.crack_datetime(&yearGPS, &monthGPS, &dayGPS, &hourGPS, &minuteGPS, &secondGPS, &hundredthsGPS, &age);
-  if (age == TinyGPS::GPS_INVALID_AGE) {
+  // check for 00/00/2000
+  if (age == TinyGPS::GPS_INVALID_AGE || monthGPS == 0) {
     logGPS=false;
   }
   else
