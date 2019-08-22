@@ -56,8 +56,8 @@
 
 
 //////////////// Key Settings /////////////////////////////////
-#define vers "Version 3.2.2"
-#define ECHO_TO_SERIAL       // Allows serial output if uncommented
+#define vers "Version 3.2.3"
+//#define ECHO_TO_SERIAL       // Allows serial output if uncommented
 //#define ECHO_ACC_PLOTTER       // Serial output of just ACC for plotter display 
 //#define ECHO_MAG_PLOTTER     // Serial output of just ACC for plotter display
 //#define GPSECHO  true        // Echo the GPS data to the Serial console
