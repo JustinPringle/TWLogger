@@ -6,7 +6,7 @@ This document includes:
 A) [Build Instructions and Circuitry Diagram](#A)    
 B) [Software and User Interface](#B)
 
-## [A) Build Instructions & Circuitry Diagram](#A)
+## A) Build Instructions & Circuitry Diagram [](#A)
 
 ### Soldering Station Required Equipment
 
@@ -105,7 +105,7 @@ Forman.](media/image6.tif){width="4.571527777777778in"
     b.  Glue in place.
 
 
-## B) Software and User Interface {#B}
+## B) Software and User Interface [](#B)
 
 **[Downloads]**
 
