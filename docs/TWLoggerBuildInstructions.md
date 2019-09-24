@@ -6,7 +6,7 @@ This document includes:
 A) [Build Instructions and Circuitry Diagram](#A)    
 B) [Software and User Interface](#B)
 
-## A) Build Instructions & Circuitry Diagram {#A}
+## [A) Build Instructions & Circuitry Diagram](#A)
 
 ### Soldering Station Required Equipment
 
