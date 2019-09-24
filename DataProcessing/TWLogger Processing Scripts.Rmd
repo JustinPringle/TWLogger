@@ -1,0 +1,580 @@
+---
+title: "TWLogger Processing Scripts"
+authors: James Fahlbusch & Katie Harrington
+date: "September 24, 2019"
+output: html_document
+---
+This processes one logger at a time. Must run entire script for each logger. Before beginning script, download deployment files into folder titled YYYYMMDD_[deploymentname] (e.g. 20190814_H38).      
+
+Setup environment:
+
+```{r setup,echo=FALSE,results="hide",warning=FALSE,collapse=TRUE,include=FALSE}
+# Set the Timezone Offset from UTC 
+tzOffset <- "Etc/GMT+3" # Falklands time in the winter
+
+# Set the Working Directory to the location of this File
+current_path = rstudioapi::getActiveDocumentContext()$path 
+setwd(dirname(current_path ))
+rm(current_path)
+getwd()
+
+# This function loads required packages and installs them if they are not found
+pkgTest <- function(x)
+{
+  if (!require(x,character.only = TRUE))
+  {
+    install.packages(x,dep=TRUE)
+    if(!require(x,character.only = TRUE)) stop("Package not found")
+  }
+}
+# Load Packages
+pkgTest("tidyverse")
+pkgTest("ggplot2")
+pkgTest("lubridate")
+pkgTest("leaflet")
+pkgTest("htmlwidgets")
+pkgTest("argosfilter")
+pkgTest("zoo")
+pkgTest("dplyr")
+pkgTest("tagtools")
+pkgTest("plotly")
+pkgTest("RcppRoll")
+pkgTest("car")
+pkgTest("gridExtra")
+pkgTest("signal")
+pkgTest("ggpubr")
+pkgTest("ggmap")
+pkgTest("maps")
+pkgTest("mapdata")
+pkgTest("maptools")
+```
+
+### Define release and retrieval time for deployment
+```{r}
+# Specify the start and end time of deployment (NOTE: will be specific to each deployment, use local deployment time)
+startTime <- as.POSIXct(strptime("2019-08-18 12:00:00",format="%Y-%m-%d %H:%M:%S"),tz=tzOffset)
+# Always use logger retrieval time (regardless if retrieved before battery died)
+endTime <- as.POSIXct(strptime("2019-08-19 14:15:00",format="%Y-%m-%d %H:%M:%S"),tz=tzOffset)
+```
+
+### Step 1a: Combine raw CSV files 
+This script combines all deployment CSVs into a single CSV and saves.
+```{r}
+# Choose the folder containing the multiple CSV files
+# Select the first CSV of the group you want to combine
+filename <- file.choose("Select the first CSV of the group")
+pathChoice <- dirname(filename)
+
+# This imports all CSV files in the directory chosen
+filenames <- list.files(path = pathChoice, pattern = "*.csv", all.files = FALSE, full.names = FALSE, recursive = FALSE, ignore.case = TRUE)
+accdata <- do.call("rbind", sapply(paste(pathChoice,"/",filenames,sep = ""), read.csv, simplify = FALSE))
+
+# Create a name column containing the date and tag number
+accdata$name <- row.names(accdata)
+deploymentName <- strsplit(accdata$name[1],'/')
+deploymentName <- deploymentName[[1]][(length(deploymentName[[1]]))-1] #pulls name of deployment from row names (n-1 element of split string)
+accdata$name <- deploymentName
+#check to see if worked
+str(accdata)
+rm(pathChoice)
+rm(filenames)
+
+# Reorder columns to prepare to change column names
+accdata <- accdata[,c("name", "Date.MM.DD.YYYY.","Time.hh.mm.ss.","Timestamp.Ms.","Temp.Raw.",
+                      "ACCELX","ACCELY","ACCELZ","MAGX","MAGY","MAGZ","Sats","HDOP","Latitude","Longitude","FixAge","DateUTC","TimeUTC","DateAge","Altitude","Course","Speed")]
+# Change column names to more practical shorter names
+colnames(accdata)[1:22] <- c("name","date","time","ts","temp","ax","ay","az","mx","my","mz","Sats","HDOP","Lat","Long","FixAge","DateUTC","TimeUTC","DateAge","Altitude","Course","Speed")
+rownames(accdata) <- c()
+
+# Create proper datetime objects (convert GMT to local time zone of deployment)
+accdata$dt <- as.POSIXct(paste(accdata$date, accdata$time), format="%m/%d/%Y %H:%M:%S", tz='GMT')
+attr(accdata$dt, "tzone") # check that dt is in GMT
+accdata$dttz <- accdata$dt # set dttz to dt
+attr(accdata$dttz, "tzone") <- tzOffset # change the timezone to tzOffset
+attr(accdata$dttz, "tzone") # check that dttz is in local time
+str(accdata)
+
+# Remove unused columns
+accdata <- subset(accdata, select = -c(date,time) )
+
+# Run subset() function to extract data for the selected timerange
+accdata <- subset(accdata, accdata$dttz >= startTime & accdata$dttz <= endTime)
+summary(accdata)
+
+# Simple plot (plots a portion of the ACC data)
+plotLength <- ifelse(length(accdata$ax)< 10000,length(accdata$ax),10000)
+ggplot(data = accdata[1:plotLength,]) +
+  geom_line(aes(x = dttz, y = ax,color = 'AX')) +
+  geom_line(aes(x = dttz, y = ay,color = 'AY')) +
+  geom_line(aes(x = dttz, y = az,color = 'AZ')) +
+  scale_colour_manual(name="Axis",
+                      values=c(AX="red", AY="blue", AZ="green")) +
+  ylab("Raw ACC") + 
+  xlab("Time") + 
+  ggtitle("First 10,000 lines of accelerometer data")
+
+# Save as .RData file
+save(accdata, file=paste(deploymentName,"-COMBINED", ".RData",sep=""))
+
+# Optional: save as a CSV file
+# write.csv(accdata, file=paste(deploymentName,"-COMBINED", ".csv",sep=""), row.names = FALSE)
+```
+
+### Step 1b: Extract and process GPS data
+This creates and saves a separate file containing only GPS data.
+```{r}
+# Extract GPS
+gpsData <- accdata[,c("dttz","dt","Sats","HDOP","Lat","Long","FixAge","DateUTC","TimeUTC","DateAge","Altitude","Course","Speed")]
+# Remove blank lines
+gpsData <- gpsData[!is.na(gpsData["Sats"]),]
+gpsData$Lat <- gpsData$Lat/1000000
+gpsData$Long <- gpsData$Long/1000000
+# Remove obvious bad hits
+gpsData <- gpsData %>% 
+  arrange(dttz) %>% 
+  dplyr::filter(between(Lat,-90,90),
+         Sats > 2,
+         between(Long, -180,180),
+         Lat != 0, Long != 0)
+tryCatch({
+  #filter by speed and angle
+  gpsData <- gpsData %>% 
+    dplyr::filter(sdafilter(Lat,Long,dt,rep(3,length(gpsData$Lat)), vmax = 30, ang = c(15, 25), distlim = c(2500, 5000))!= "removed")}, 
+# warning = function(war) {
+#   # warning handler picks up where error was generated
+#   print(paste("WARNING:  ",war))},
+error=function(err){
+  print(paste("SDA Filter Error:  ",err,", using Distance-only Filter instead"))
+}, finally = {
+# filter by speed only (30 m/s)
+  gpsData <- gpsData %>% 
+  dplyr::filter(vmask(Lat,Long,dt, vmax = 30)!= "removed")
+}) # END tryCatch
+
+# Create proper datetime objects from GPS datetimes (convert GMT to local)
+gpsData$dtGPS <- as.POSIXct(paste(gpsData$DateUTC, gpsData$TimeUTC), format="%m/%d/%Y %H:%M:%S", tz='GMT')
+attr(gpsData$dtGPS, "tzone") # check that dt is in GMT
+gpsData$dttzGPS <- gpsData$dtGPS # set dttz to dt
+attr(gpsData$dttzGPS, "tzone") <- tzOffset # change the timezone to tzOffset
+attr(gpsData$dttzGPS, "tzone") # check that dttz is in local time
+str(gpsData)
+
+# check to make sure data is reasonably located
+plot(gpsData$Long,gpsData$Lat)
+
+rownames(gpsData) <- c()
+
+# Save as .RData file
+deploymentName <- accdata$name[1]
+save(gpsData,file=paste(deploymentName,"-GPSData", ".RData",sep=""))
+
+# KJH/JAF: Would love to have these save directly to a specific folder
+# Save as a CSV file
+# write.csv(gpsData, file=paste(deploymentName, "-GPSData", ".csv",sep=""), row.names = FALSE)
+write.csv(gpsData, paste0(getwd(), "/00Data-2019-NWI-TWLogger-GPS/",deploymentName, "-GPSData", ".csv"), row.names = FALSE)
+```
+
+### Step 1c (OPTIONAL): Confirm regular sampling rate across data (and remove or interpolate if necessary)
+If continuing from above, skip to next chunk. If beginning here, first import data.
+```{r}
+# Option 1: import R.Data file
+load("20190818_H38-COMBINED.RData")
+# Option 2: import a CSV file
+filename <- file.choose()
+accdata <- read_csv(filename) # Load the Combined Data File
+```
+
+If continuing from Step 1b, begin here.
+```{r}
+# Make sure the sampling rate you choose aligns with the frequency
+resampleRate = 50
+
+# Assumes that data has already been processed as accData (in preceding section)
+data <- accdata[, c("name","ts","temp","ax","ay","az","mx","my","mz","dt","dttz")]
+# show a table with the frequency of frequencies
+data %>%
+  # seconds since the beginning
+  mutate(secs_since = as.numeric(dttz - min(dttz))) %>%
+  # group into within-seconds blocks
+  group_by(secs_since) %>%
+  # frequency and period of sampling
+  dplyr::mutate(freq = n()) %>%
+  ungroup %>%
+  {table(.$freq)} -> freqCount
+# Count of number of occurrances of each freq
+freqCount / as.numeric(names(freqCount))
+# Percentage of total of each freq
+format((freqCount / as.numeric(names(freqCount)))/sum((freqCount / as.numeric(names(freqCount)))),scientific=FALSE)
+
+# Find the actual number of samples that will be interpolated
+frequencies <- data.frame(freqCount)
+frequencies$samplingRate <- as.numeric(names(freqCount))
+
+frequencies <- frequencies %>% 
+  mutate(samplesInterpolated = case_when(
+    samplingRate < resampleRate ~ (resampleRate-samplingRate)*(Freq/samplingRate),
+    TRUE ~ 0.0),
+    totalSamples = case_when(
+    samplingRate > resampleRate ~ (Freq - Freq/samplingRate),
+    TRUE ~ Freq*1.0)) 
+
+freqSum <- frequencies %>% 
+  summarize(totalInterpoated = sum(samplesInterpolated),
+            totalSamples = sum(totalSamples),
+            # note: this is in % (i.e. has already been multiplied by 100)
+            percentInterpolated = sum(samplesInterpolated)/sum(totalSamples)*100)
+freqSum
+
+# Create a dataframe with period and frequency 
+data2 <- data %>%
+  # seconds since the beginning
+  dplyr::mutate(secs_since = as.numeric(dttz - min(dttz))) %>% 
+  # Filter out first and last seconds because they're partial
+  dplyr::filter(secs_since > 0,
+         secs_since < max(secs_since)) %>% 
+  # reset seconds since the beginning (could just subtract 1?)
+  dplyr::mutate(secs_since = secs_since-1) %>%
+  #mutate(secs_since = as.numeric(dttz - min(dttz))) %>%
+  # group into within-seconds blocks
+  dplyr::group_by(secs_since) %>%
+  # frequency and period of sampling
+  dplyr::mutate(freq = n(),
+                period = 1 / resampleRate,
+                # fraction of a second since beginning of second (i.e. 0-1)
+                frac_sec = (row_number() - 1) / resampleRate,
+                # seconds since beginning (e.g. 9.456)
+                true_since = secs_since + frac_sec) %>%
+  ungroup %>%
+  # Remove any greater than resampleRate 
+  dplyr::filter(frac_sec<=.98) %>%
+  # true time down to fractional second (e.g. 2018-06-07 16:57:12.1234)
+  dplyr::mutate(true_time = min(dttz) + true_since,
+         tsDif = c(0, diff(ts)))
+  
+# show a table with the frequency of frequencies
+data2$freq %>% table -> freqCount
+freqCount / as.numeric(names(freqCount))
+
+#create a dataframe with regular sampling
+data3 <- data.frame(true_time = seq(from = min(data2$true_time),
+                               to = max(data2$true_time),
+                               by = 1 / resampleRate)) %>%
+  merge(data2,all=TRUE) #Merge with data2 (fills unmatched with NA)
+
+#fill name into Newly created NA rows
+data3$name <- data3$name[1]
+
+data3 <- data3[, c("true_time", "name","ts","temp","ax","ay","az","mx","my","mz","freq","secs_since","true_since", "tsDif")]
+colnames(data3)[1] <- c("dttz")
+
+data3$temp <- na.fill(na.approx(data3$temp, data3$dttz, na.rm = FALSE),"extend")
+data3$ax <- na.fill(na.approx(data3$ax, data3$dttz, na.rm = FALSE),"extend")
+data3$ay <- na.fill(na.approx(data3$ay, data3$dttz, na.rm = FALSE),"extend")
+data3$az <- na.fill(na.approx(data3$az, data3$dttz, na.rm = FALSE),"extend")
+data3$mx <- na.fill(na.approx(data3$mx, data3$dttz, na.rm = FALSE),"extend")
+data3$my <- na.fill(na.approx(data3$my, data3$dttz, na.rm = FALSE),"extend")
+data3$mz <- na.fill(na.approx(data3$mz, data3$dttz, na.rm = FALSE),"extend")
+data3$true_since <- na.fill(na.approx(data3$true_since, data3$dttz, na.rm = FALSE),"extend")
+
+#simple plot
+# library(ggplot2)
+# ggplot() +
+#   geom_line(data = data3, aes(x = dttz, y = ax,color = 'AX')) +
+#   geom_line(data = data3, aes(x = dttz, y = ay,color = 'AY')) +
+#   geom_line(data = data3, aes(x = dttz, y = az,color = 'AZ')) +
+#   scale_colour_manual(name="Axis",
+#                       values=c(AX="red", AY="blue", AZ="green")) +
+#   ylab("Raw ACC") + 
+#   xlab("Time") 
+
+# check results
+origP <- data2 %>%
+  dplyr::slice(1e6:(1e6+200)) %>%
+  ggplot(aes(x = true_time,
+             y = ax)) +
+  geom_line() +
+  geom_point(size = 1) +
+  labs(title = 'Original data')
+
+time_rng <- range(data2$true_time[1e6:(1e6+200)])
+
+rediscP <- data3 %>%
+  dplyr::filter(between(dttz, time_rng[1], time_rng[2])) %>%
+  ggplot(aes(x = dttz,
+             y = ax)) +
+  geom_line() +
+  geom_point(size = 1) +
+  labs(title = 'Rediscretized data')
+ggarrange(origP,rediscP,nrow=2)
+
+# Save as .RData file
+deploymentName <- accdata$name[1]
+save(data3, file=paste(deploymentName,"-",resampleRate,"HZ",".RData",sep=""))
+
+# Optional: save as a CSV file
+# write_csv(data3, file.path(dirname(filename), paste(resampleRate,"HZ-",basename(filename),sep="")))
+
+data <- data3
+
+# Clean global environment
+rm(accdata)
+rm(data2)
+rm(data3)
+rm(freqSum)
+rm(frequencies)
+rm(origP)
+rm(rediscP)
+rm(freqCount)
+rm(plotLength)
+rm(resampleRate)
+rm(time_rng)
+```
+
+### Step 3: Apply calibrations
+If continuing from above, skip to next chunk. If beginning here, first import data.
+```{r}
+# Option 1 -- Import CSV
+filename <- file.choose()
+data <- read_csv(filename,
+                 col_types = cols(
+                   ax = col_double(),
+                   ay = col_double(),
+                   az = col_double(),
+                   mx = col_double(),
+                   my = col_double(),
+                   mz = col_double(),
+                   secs_since = col_double(),
+                   temp = col_double()))
+depid <- basename(filename)
+depid <- strsplit(depid,'-')
+depid <- depid[[1]][2]
+
+# Option 2 -- Import R.Data (NOTE: Change file name depending on deployement.)
+load("20190818_H38-50Hz.RData")
+```
+
+If continuing from Step 2, begin here.
+```{r}
+# Create depid
+depid <- strsplit(deploymentName,'_')
+depid <- depid[[1]][2]
+
+# Transform axes to North East Up sensor orientation used in Tag Tools 
+# Acc	 [x -y z]
+data$axT <- data$ax * (1.0)
+data$ayT <- data$ay * (-1.0)
+data$azT <- data$az * (1.0)
+# Create a matrix with Acc data
+At <- cbind(data$axT,data$ayT,data$azT)
+# Check for NA
+sum(is.na(At))
+# If NAs, remove using linear approximation
+if(sum(is.na(At)>0)){
+  Atnarm <- At
+  Atnarm <- na.approx(Atnarm, na.rm = FALSE)
+} else {
+  Atnarm <- At
+}
+# Check again for NAs
+sum(is.na(Atnarm))
+# Create an Acc sensor structure using At (NOTE: manually change fs value if not 50)
+Atstruct <- sens_struct(data = Atnarm, fs = 50, depid = depid,type='acc')
+# Plot 
+# Alist <- list(A = Atstruct$data)
+# plott(Alist,50)
+
+data$mxT <- data$mx * 1.0
+data$myT <- data$my * (-1.0)
+data$mzT <- data$mz * 1.0
+# Create a matrix with Mag data
+Mt <- cbind(data$mxT,data$myT,data$mzT)
+# Check for NA
+sum(is.na(Mt))
+# If NAs, remove using linear approximation
+if(sum(is.na(Mt))>0){
+  Mtnarm <- Mt
+  Mtnarm <- na.approx(Mtnarm, na.rm = FALSE)
+} else {
+  Mtnarm <- Mt
+}
+# Check again for NAs
+sum(is.na(Mtnarm))
+# Create an Mag sensor structure using Mt (NOTE: manually change fs value if not 50)
+Mtstruct <- sens_struct(data = Mtnarm, fs = 50, depid = depid,type='mag')
+# Plot 
+# Mlist <- list(M = Mtstruct$data)
+# plott(Mlist,50)
+# import calibration file for logger
+cal <- read_csv(file.choose())
+AccCal <- list(poly = cbind(cal$AccPoly1,cal$AccPoly2), cross = cbind(cal$AccCross1,cal$AccCross2,cal$AccCross3))
+MagCal <- list(poly = cbind(cal$MagPoly1,cal$MagPoly2), cross = cbind(cal$MagCross1,cal$MagCross2,cal$MagCross3))
+
+AtCal <- apply_cal(Atnarm,cal = AccCal, T = NULL)
+list <- list(A = AtCal[10000:180000,])
+plott(list,50)
+MtCal <- apply_cal(Mtnarm,cal = MagCal, T = NULL)
+list <- list(M = MtCal[10000:300000,])
+# plott(list,50, interactive = T)
+plott(list,50)
+
+    # ## NOTE: This Section is optional, only use if spikes in Mag Data.
+    # # Look at plotted magnetometer for bad hits and find a threshold
+    # hiThresh <- 45
+    # loThresh <- -45
+    # MtCalThresh <- MtCal
+    # MtCalThresh[MtCalThresh > hiThresh] = NA
+    # MtCalThresh[MtCalThresh < loThresh] = NA
+    # sum(is.na(MtCalThresh))
+    # MtCalThresh <- na.approx(MtCalThresh, na.rm = FALSE)
+    # 
+    # list <- list(M = MtCalThresh[10000:300000,])
+    # plott(list,50)
+    # sum(is.na(MtCalThresh))
+    # # If all looks Good, Save the Data back to MtCal
+    # MtCal <- MtCalThresh
+
+#Save Calibrated Data Back To Dataframe
+data2 <-cbind(data[,1:4],AtCal,MtCal,data[12:14])
+#Rename Columns
+colnames(data2) <- c("dttz","name","ts","temp","Ax","Ay","Az",
+                     "Mx","My","Mz","secs_since","true_since","tsDiff")
+names(data2)
+data <- data2
+
+# Save as .RData file
+save(data, file=paste(depid,"-50Hz.csv",".RData",sep=""))
+
+# Optional: save as a CSV file
+# write_csv(data, file.path(dirname(filename), paste(depid,"-50Hz.csv",sep="")))
+
+# Clean global environment
+rm(AccCal)
+rm(At)
+rm(AtCal)
+rm(Atnarm)
+rm(Atstruct)
+rm(cal)
+rm(data2)
+rm(list)
+rm(MagCal)
+rm(Mt)
+rm(MtCal)
+rm(Mtnarm)
+rm(Mtstruct)
+
+```
+
+### Step 4: Downsample data to 1-Hz
+Creates datax (dataframe containing 1-Hz downsampled data). Preserves data (dataframe containing 50-Hz data).
+
+If continuing from above, skip to next chunk. If beginning here, first import data.
+```{r}
+# Select file to import
+filename <- file.choose()
+# Import original 50-Hz data
+data <- read_csv(filename, 
+                 col_types = cols(
+                   #dttz = col_datetime(),
+                   #dt = col_datetime(),
+                   temp = col_double(), # Only comment this out for 2017/2019 tags
+                   Ax = col_double(),
+                   Ay = col_double(),
+                   Az = col_double(),
+                   Mx = col_double(),
+                   My = col_double(),
+                   Mz = col_double(),
+                   # freq = col_double(), # Comment this out for 2017/2019 tags
+                   secs_since = col_double()))
+# Create deployment ID
+depid <- basename(filename)
+depid <- strsplit(depid,'-')
+depid <- depid[[1]][1]
+depid
+# Confirm correct dttz, since it has not been retaining time zone when writing to CSV 
+attr(data$dttz, "tzone") # Check tz
+attr(data$dttz, "tzone") <- tzOffset # Use this to change from UTC to proper local time (time will change)
+data$dttz <- force_tz(data$dttz,tzone=tzOffset) # If time is correct and tz is wrong, force the tz (time will NOT change)
+```
+
+If continuing from Step 3, begin here.
+```{r}
+# Subset to only include time and acc data
+data <- data[,c("dttz","true_since","Ax","Ay","Az")]
+
+# Down sample data (decimate each vector separately)
+df <- 50 # Set decimation factor df
+fs <- 50 # Set original sampling rate
+
+# For datetime select every nth value
+dttz <- data$dttz
+a <- dttz
+dttz_down <- a[seq(1, length(a), df)]
+
+# For true_since select every nth value
+true_since <- data$true_since
+a <- true_since
+true_since_down <- a[seq(1, length(a), df)]
+
+# Create individual vectors from acc fields
+Ax <- data$Ax
+Ay <- data$Ay
+Az <- data$Az
+
+# Convert vectors to numeric matrix
+Ax_mat <- matrix(Ax,ncol=1)
+Ay_mat <- matrix(Ay,ncol=1)
+Az_mat <- matrix(Az,ncol=1)
+
+# Use decimate function
+n <- 12*5
+Ax_down <- decimate(Ax_mat,5,n=n,ftype="fir")
+Ay_down <- decimate(Ay_mat,5,n=n,ftype="fir")
+Az_down <- decimate(Az_mat,5,n=n,ftype="fir")
+
+n <-12*10
+Ax_down <- decimate(Ax_down,10,n=n,ftype="fir")
+Ay_down <- decimate(Ay_down,10,n=n,ftype="fir")
+Az_down <- decimate(Az_down,10,n=n,ftype="fir")
+
+# Combine down sampled data into one dataframe
+data_down <- cbind.data.frame(dttz_down,true_since_down,Ax_down,Ay_down,Az_down)
+data <- data_down
+
+# Create Bird ID after downsampling
+data$ID <- depid
+
+# Change column names to more practical shorter names
+colnames(data)[1:6] <- c("dttz","true_since","Ax","Ay","Az","ID")
+# Reorder columns
+data <- data[,c("ID","dttz","true_since","Ax","Ay","Az")]
+
+# Very important to run this line to reset sampling rate to down sampled rate
+fs = fs/df
+
+# Save as .RData file
+save(data, file=paste(depid,"-1Hz",".RData",sep=""))
+
+# Optional: save as a CSV file
+# write_csv(data, file.path(dirname(filename), paste(depid,"-1Hz.csv",sep="")))
+
+# Clean global environment
+rm(Ax_mat)
+rm(Ay_mat)
+rm(Az_mat)
+rm(data_down)
+rm(a)
+rm(Ax)
+rm(Ax_down)
+rm(Ay)
+rm(Ay_down)
+rm(Az)
+rm(Az_down)
+rm(df)
+rm(dttz)
+rm(dttz_down)
+rm(fs)
+rm(n)
+rm(true_since)
+rm(true_since_down)
+```
+
