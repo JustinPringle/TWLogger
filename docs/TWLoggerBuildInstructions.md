@@ -8,23 +8,16 @@ B) [Software and User Interface](#B)
 
 ## A) Build Instructions & Circuitry Diagram {#A}
 
-**[Soldering Station Required Equipment]{.underline}**:
+### Soldering Station Required Equipment
 
-Soldering iron (Fig. A1)
-
-Nonconductive table clamps or prefabricated soldering clamp stand (Fig. A2)
-
-Lead-free solder
-
-26-gauge solid core wire
-
-Wire strippers
-
-Electrical tape
-
-Foam paper (e.g., craft supply store)
-
-Glue (e.g., clear liquid super glue)
+* Soldering iron (Fig. A1)
+* Nonconductive table clamps or prefabricated soldering clamp stand (Fig. A2)
+* Lead-free solder
+* 26-gauge solid core wire
+* Wire strippers
+* Electrical tape
+* Foam paper (e.g., craft supply store)
+* Glue (e.g., clear liquid super glue)
 
 ![Fig. A1. Sample solder station and equipment. Note the blue rubber dish
 is the nonconductive safety pad upon which all soldering takes place.](media/image1.jpg){width="4.180247156605424in"
@@ -35,7 +28,7 @@ while soldering.](media/image2.jpg){width="4.178240376202974in"
 height="2.3502602799650045in"}
 
 
-**[Components List]{.underline}**:
+### Components List
 
 Purchased from [www.adafruit.com](http://www.adafruit.com) (part \#)
 
@@ -47,7 +40,7 @@ Purchased from [www.adafruit.com](http://www.adafruit.com) (part \#)
 
 4.  Lithium - 3.7v 500mAh (\#1578)
 
-**[Build Instructions]{.underline}**:
+**[Build Instructions]**:
 
 This is a 4-part process. Prepare each circuit board separately prior to
 combining. Wire lengths are given with the corresponding pin name to
@@ -114,7 +107,7 @@ Forman.](media/image6.tif){width="4.571527777777778in"
 
 ## B) Software and User Interface {#B}
 
-**[Downloads]{.underline}**
+**[Downloads]**
 
 1.  SD Formatter
 
@@ -128,11 +121,11 @@ Forman.](media/image6.tif){width="4.571527777777778in"
 
 > <https://www.rstudio.com/products/rstudio/download/>
 
-**[SD Formatter]{.underline}**
+**[SD Formatter]**
 
 1.  Name and format SD card prior to using with TWLogger
 
-**[Arduino]{.underline}**
+**[Arduino]**
 
 1.  Install Arduino software
 
@@ -270,7 +263,7 @@ Table B1. User-defined parameters available in the TWLogger setup state.
         an error. The most likely cause the inability to read or write
         to the SD card.
 
-**[R Studio]{.underline}**
+**[R Studio]**
 
 1.  Documented TWLogger analysis scripts available here:
     
