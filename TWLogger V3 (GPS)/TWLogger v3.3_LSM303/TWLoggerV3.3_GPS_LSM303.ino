@@ -2,7 +2,7 @@
  Author: James Fahlbusch
  
  Low Power Inertial Movement Datalogger for Feather M0 Adalogger 
- Version 3.2.3
+ Version 3.3
  Samples Temp, Accel, Mag, and GPS
  Logs to CSV, flushing data after SamplesPerCycle samples
  Internal RTC used to timestamp sensor data
@@ -38,17 +38,20 @@
  Added GPS functionality 6/4/18 
  Added GPS control Options 6/29/18
  Added Log Chip Serial and samplingRate Options 7/25/18
- Changed Flush and File creation to ensure more regular sampling 8/7/2018
- Changed File Naming for 2 digit tag numbers 1/26/2019
+ Changed Flush and File creation to ensure more regular sampling 8/7/18
+ Changed File Naming for 2 digit tag numbers 1/26/19
  Added Plotter Output 1/31/19
  Better GPS Error Checking 8/18/19
+ Added functionality to change sensor settings (ODR, scale and gain) 10/8/19
 
  Power Consumption: 
- 500mAh Battery - ~39hrs @ 5min GPS, ~32hrs @ 2min GPS, ~26 hhrs @ 1min (50Hz ACC/Mag)
+ 500mAh Battery - ~39hrs @ 5min GPS, ~32hrs @ 2min GPS, ~26hrs @ 1min (50Hz ACC/Mag)
  
 */
 
 // ToDo~!!
+// *** Add fix delay option (Much like a start delay but determined by gps fix) ***
+// Add sampling rate change in sensors when different retick rate is selected.
 // Check if AdafruitSensor and be removed
 // Sensitivity testing of variables like timeout, number of samples to collect, MS smart delay
 // Can I correct for slight drift in the sampling rate by changing where the time is checked
@@ -56,11 +59,11 @@
 
 
 //////////////// Key Settings /////////////////////////////////
-#define vers "Version 3.2.3"
+#define vers "Version 3.3"
 //#define ECHO_TO_SERIAL       // Allows serial output if uncommented
-//#define ECHO_ACC_PLOTTER       // Serial output of just ACC for plotter display 
+//#define ECHO_ACC_PLOTTER     // Serial output of just ACC for plotter display 
 //#define ECHO_MAG_PLOTTER     // Serial output of just ACC for plotter display
-//#define GPSECHO  true        // Echo the GPS data to the Serial console
+//#define GPSECHO              // Echo the GPS data to the Serial console
 //#define Gyro_On              // Allows Gyro output if uncommented
 #define MinutesPerCycle 1      // Number of Minutes to buffer before uSD card flush is called. 
 #define HoursPerFile 5         // Number of Hours of data per file
@@ -78,8 +81,9 @@
 #include <SdFat.h>
 SdFat SD;
 #include <Wire.h>
+#include <SPI.h>
 #include <Adafruit_Sensor.h>   //General sensor library for Adafruit
-#include <TW_LSM303.h>         //library for Accel Mag Sensor LSM 303
+#include <TW_LSM303v2.h>       //library for Accel Mag Sensor LSM 303, updated
 #include <TinyGPS.h>
 //Libraries for ReTick
 #include "Arduino.h"
@@ -120,7 +124,12 @@ long lat, lon, altitude;
 unsigned long fixage, age, dateUTC, timeUTC, chars = 0;
 unsigned long course, speed, sats, hdop;
 
-TW_LSM303 lsm = TW_LSM303(); // Initialize the IMU
+TW_LSM303v2 lsm = TW_LSM303v2(); // Initialize the IMU
+// Default sampling rates
+byte AccODR = 0x64;
+byte AccRes = 0x08;
+byte MagODR = 0x4B;
+byte MagRes = 0x04;
 
 #define cardSelect 4  // Set the pin used for uSD
 #define RED 13        // Red LED on Pin #13
@@ -155,7 +164,7 @@ unsigned short delayStart = 0;
 unsigned int timekeeper = 0;
 // Variable to store the tag number
 uint8_t tag = 0;
-byte samplingRate = retickRate; // set sampling rate to default (50Hz)
+uint16_t samplingRate = retickRate; // set sampling rate to default (50Hz)
 
 RTCZero rtc;          // Create RTC object
 File logfile;         // Create file object
@@ -166,6 +175,46 @@ unsigned int CurrentCycleCount;  // Num of smaples in current cycle, before uSD 
 unsigned int CurrentFileCount;   // Num of samples in current file
 bool start = false;
 char tzOffset[] = "+00";    // Array to store Timezone Offset, stored in info file
+
+///////// File Interaction Variables ///////////////////
+const uint8_t spiSpeed = SPI_FULL_SPEED; // Use SPI_HALF_SPEED for slower SPI bus speed
+// constants for file system structure
+uint16_t const BU16 = 128;
+uint16_t const BU32 = 8192;
+#define sdError(msg) sdError_F(F(msg))
+// Serial output stream
+ArduinoOutStream cout(Serial);
+
+Sd2Card card;
+uint32_t cardSizeBlocks;
+uint16_t cardCapacityMB;
+
+// cache for SD block
+cache_t cache;
+
+// MBR information
+uint8_t partType;
+uint32_t relSector;
+uint32_t partSize;
+
+// Fake disk geometry
+uint8_t numberOfHeads;
+uint8_t sectorsPerTrack;
+
+// FAT parameters
+uint16_t reservedSectors;
+uint8_t sectorsPerCluster;
+uint32_t fatStart;
+uint32_t fatSize;
+uint32_t dataStart;
+
+//  strings needed in file system structures
+char noName[] = "NO NAME    ";
+char fat16str[] = "FAT16   ";
+char fat32str[] = "FAT32   ";
+// flash erase all data
+uint32_t const ERASE_SIZE = 262144L;
+
 
 //////////////    Setup   ///////////////////
 void setup() {  
@@ -230,6 +279,16 @@ void setup() {
   rtc.setDate(day, month, year);
   updateFileNames();
   
+  /* Initialise the IMU with default settings */
+  if(!lsm.begin())
+  {
+    /* There was a problem detecting the LSM9DS0 ... check your connections */
+    Serial.print(F("Ooops, no LSM303 detected ... Check your wiring!"));
+    while(1);
+  }
+  delay(500);
+
+  /* Enter Menu (if serial monitor is open) */  
   while(!start){
     // Print the control menu:
     printMenu();
@@ -239,21 +298,7 @@ void setup() {
     parseMenu(Serial.read());   
   }
 
-  /* Initialise the sensor */
-  if(!lsm.begin())
-  {
-    /* There was a problem detecting the LSM9DS0 ... check your connections */
-    Serial.print(F("Ooops, no LSM303 detected ... Check your wiring!"));
-    while(1);
-  }
-  Serial.println(F("Found LSM303"));
-  /* Display some basic information on this sensor */
-  displaySensorDetails(); //add critical settings to be displayed as well
-  /* Setup the sensor gain and integration time */
-  configureSensor();
-  delay(500);
-
-    //Set Alarm
+  //Set Alarm
   if(delayStart > 0) {
     
     Serial.println("Logging will begin at:");  
@@ -668,7 +713,6 @@ void error(uint8_t errno) {
   }
 }
 
-
 /**************************************************************************/
 /*
     Displays some basic information on this sensor from the unified
@@ -677,21 +721,16 @@ void error(uint8_t errno) {
 /**************************************************************************/
 void displaySensorDetails(void)
 {
-  //Display sensor Details such as sensitivity
-  /*sensor_t accel, mag, gyro, temp;
-  lsm.getSensor(&accel, &mag, &gyro, &temp);
+  //Display sensor Details such as Sensitivity and Output Data Rate
+  Serial.println(F("------------------------------------"));
+  Serial.println(F("---- Current IMU Settings ----"));
+  Serial.print  (F("Tag Sampling Rate:   ")); Serial.print(1000/samplingRate); Serial.println(F(" Hz"));    
+  Serial.print  (F("ACC ODR:             ")); Serial.print(AccODR);   Serial.println(F(" Hz"));
+  Serial.print  (F("ACC Resolution:  +/- ")); Serial.print(AccRes); Serial.println(F(" g"));
+  Serial.print  (F("MAG ODR:             ")); Serial.print(MagODR); Serial.println(F(" Hz"));
+  Serial.print  (F("MAG Resolution:  +/- ")); Serial.print(MagRes); Serial.println(F(" gauss"));
+  Serial.println(F("Note: Sensors are set to sample faster (~1.5-2x) than the device sampling rate"));
 
-  Serial.println(F("------------------------------------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(temp.name);
-  Serial.println(F("------------------------------------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(accel.name);
-  Serial.println(F("------------------------------------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(mag.name);
-  #ifdef Gyro_On 
-  Serial.println(F("------------------------------------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(gyro.name);
-  #endif
-  */
 }
 
 /**************************************************************************/
@@ -747,7 +786,11 @@ void writeDeploymentDetails(void)
   settingsFile.println(MinutesPerCycle);
   settingsFile.print("Number of Hours of Sampling per CSV file: "); 
   settingsFile.println(HoursPerFile);
-  settingsFile.print("ACC/MAG Sampling Rate: "); settingsFile.print(1000/samplingRate); settingsFile.println("Hz");
+  settingsFile.print("IMU Sampling Rate: "); settingsFile.print(1000/samplingRate); settingsFile.println("Hz");
+  settingsFile.print("Acc Output Data Rate: "); settingsFile.print(AccODR); settingsFile.println("Hz");
+  settingsFile.print("Acc Sensitivity: +/- "); settingsFile.print(AccRes); settingsFile.println("g");
+  settingsFile.print("Mag Output Data Rate: "); settingsFile.print(MagODR); settingsFile.println("Hz");
+  settingsFile.print("Mag Sensitivity: +/- "); settingsFile.print(MagRes); settingsFile.println("gauss");
   settingsFile.println();
   settingsFile.println(F("GPS Settings:"));
   settingsFile.print("GPS Sampling Rate (seconds): "); settingsFile.println(gpsRate);
@@ -813,11 +856,12 @@ void printMenu()
   print2digits(rtc.getYear());
   Serial.println();
   Serial.println();
+  Serial.println(F("0) Format Card"));
   Serial.println(F("1) Enter Tag Number"));
   Serial.println(F("2) Set Date and Time (GMT)"));
   Serial.println(F("3) Display Time"));
   Serial.println(F("4) Set Start Delay"));
-  Serial.println(F("5) Set Sampling Rate"));
+  Serial.println(F("5) Set IMU Parameters"));
   Serial.println(F("6) Set Local Timezone Offset"));
   Serial.println(F("7) Check GPS Fix"));
   Serial.println(F("8) Set GPS Parameters"));
@@ -829,6 +873,9 @@ void parseMenu(char c)
 {
   switch (c)
   {
+    case '0':
+        sfFormat();      
+      break;
     case '1':
         setTagNum();      
       break;
@@ -842,7 +889,7 @@ void parseMenu(char c)
         setDelayStart();
       break;
     case '5':
-        setSamplingRate();
+        setIMU();
       break;
     case '6':
         setTZ();
@@ -963,36 +1010,198 @@ void setTZ(void)
 
 /**************************************************************************/
 /*
+  This function allows the user to set the IMU Parameters
+*/
+/**************************************************************************/
+void setIMU(void)
+{
+    displaySensorDetails();
+    Serial.println(); 
+    Serial.println("Which parameters would you like to set?");
+    Serial.println(F("0) Return to Main Menu"));
+    Serial.println(F("1) IMU Sampling Rate"));
+    Serial.println(F("2) Accelerometer Resolution (scale)"));
+    Serial.println(F("3) Magnetometer Resolution (gain)"));
+    byte rsp = prompt("Enter the number beside the parameter (0-3)", 0, 3);
+    switch (rsp)
+    {
+      case 0:
+        break;
+      case 1:
+        setSamplingRate(); 
+        break;
+      case 2:
+        setAccRes(); break;
+      case 3:
+        setMagRes(); break;
+      default:
+        break;
+      break;
+    }
+    displaySensorDetails();
+    Serial.println(); 
+}
+
+
+/**************************************************************************/
+/*
   This function allows the user to set the Sampling Rate
 */
 /**************************************************************************/
 void setSamplingRate(void)
 {
+    Serial.println(); 
     Serial.println("Set the ACC/MAG Sampling Rate:");
-    Serial.println(F("1) 5Hz"));
-    Serial.println(F("2) 10Hz"));
-    Serial.println(F("3) 25Hz"));
-    Serial.println(F("4) 40Hz"));    
-    Serial.println(F("5) 50Hz (Default)"));
-    //Serial.println(F("6) 100Hz"));// Not implemented in this version
-    byte rsp = prompt("Enter the number beside the Sampling Rate (1-5)", 1, 5);
+    Serial.println(F("1) 1Hz"));
+    Serial.println(F("2) 5Hz"));
+    Serial.println(F("3) 10Hz"));
+    Serial.println(F("4) 25Hz"));
+    Serial.println(F("5) 40Hz"));    
+    Serial.println(F("6) 50Hz (Default)"));
+    //Serial.println(F("7) 100Hz"));// Not implemented in this version
+    byte rsp = prompt("Enter the number beside the Sampling Rate (1-6)", 1, 6);
+    bool success1 = false;
+    bool success2 = false;    
     switch (rsp)
     {
       case 1:
-        samplingRate = 200; Serial.println("Sampling Rate: 5Hz"); break;
+        samplingRate = 1000;
+        success1 = lsm.setAccODR(lsm.LSM303_ACCODR_1HZ);
+        success2 = lsm.setMagODR(lsm.LSM303_MAGODR_1_5HZ); 
+        if(success1 && success2){ Serial.println("Sampling Rate: 1Hz"); AccODR = 0x01; MagODR = 0x01;} 
+        else{ Serial.println("Error writing sampling rate to sensors");} 
+        break;
       case 2:
-        samplingRate = 100; Serial.println("Sampling Rate: 10Hz"); break;
+        samplingRate = 200; 
+        success1 = lsm.setAccODR(lsm.LSM303_ACCODR_10HZ);
+        success2 = lsm.setMagODR(lsm.LSM303_MAGODR_7_5HZ);         
+        if(success1 && success2){ Serial.println("Sampling Rate: 5Hz"); AccODR = 0x0A; MagODR = 0x07;} 
+        else{ Serial.println("Error writing sampling rate to sensors"); } 
+        break;
       case 3:
-        samplingRate = 40; Serial.println("Sampling Rate: 25Hz");break;
+        samplingRate = 100; 
+        success1 = lsm.setAccODR(lsm.LSM303_ACCODR_25HZ);
+        success2 = lsm.setMagODR(lsm.LSM303_MAGODR_15HZ);         
+        if(success1 && success2){ Serial.println("Sampling Rate: 10Hz"); AccODR = 0x19; MagODR = 0x0F;} 
+        else{ Serial.println("Error writing sampling rate to sensors"); } 
+        break;
       case 4:
-        samplingRate = 25; Serial.println("Sampling Rate: 40Hz");break;
+        samplingRate = 40; 
+        success1 = lsm.setAccODR(lsm.LSM303_ACCODR_25HZ);
+        success2 = lsm.setMagODR(lsm.LSM303_MAGODR_30HZ); 
+        if(success1 && success2){ Serial.println("Sampling Rate: 25Hz"); AccODR = 0x19; MagODR = 0x1E;} 
+        else{ Serial.println("Error writing sampling rate to sensors");} 
+        break;
       case 5:
-        samplingRate = 20; Serial.println("Sampling Rate: 50Hz"); break;
- //   case 6: // Not implemented in this version
- //     samplingRate = 10; Serial.println("Sampling Rate: 100Hz"); break;
+        samplingRate = 25; 
+        success1 = lsm.setAccODR(lsm.LSM303_ACCODR_50HZ);
+        success2 = lsm.setMagODR(lsm.LSM303_MAGODR_75HZ);         
+        if(success1 && success2){ Serial.println("Sampling Rate: 40Hz"); AccODR = 0x32; MagODR = 0x4B;} 
+        else{ Serial.println("Error writing sampling rate to sensors"); } 
+        break;
+      case 6:
+        samplingRate = 20; 
+        success1 = lsm.setAccODR(lsm.LSM303_ACCODR_100HZ);
+        success2 = lsm.setMagODR(lsm.LSM303_MAGODR_75HZ);         
+        if(success1 && success2){ Serial.println("Sampling Rate: 50Hz"); AccODR = 0x64; MagODR = 0x4B;} 
+        else{ Serial.println("Error writing sampling rate to sensors"); } 
+        break;
+ /*   case 7: // Not implemented in this version
+        samplingRate = 10; 
+        success1 = lsm.setAccODR(lsm.LSM303_ACCODR_200HZ);
+        success2 = lsm.setMagODR(lsm.LSM303_MAGODR_75HZ); 
+        if(success1 && success2){ Serial.println("Sampling Rate: 100Hz"); AccODR = 0xC8; MagODR = 0x4B;} 
+        else{ Serial.println("Error writing sampling rate to sensors"); } break; */
       default:
-        samplingRate = 20; Serial.println("Sampling Rate: 50Hz");break;
+        samplingRate = 20; 
+        success1 = lsm.setAccODR(lsm.LSM303_ACCODR_100HZ);
+        success2 = lsm.setMagODR(lsm.LSM303_MAGODR_75HZ);         
+        if(success1 && success2){ Serial.println("Sampling Rate: 50Hz"); AccODR = 0x64; MagODR = 0x4B;} 
+        else{ Serial.println("Error writing sampling rate to sensors"); } 
+        break;
       break;
+    }
+    Serial.println(); 
+}
+
+/**************************************************************************/
+/*
+  This function allows the user to set the ACC Resolution (g)
+*/
+/**************************************************************************/
+void setAccRes(void)
+{
+    Serial.println(); 
+    Serial.println("Set the ACC Resolution (g):");
+    Serial.println(F("1) +/- 2G"));
+    Serial.println(F("2) +/- 4G"));
+    Serial.println(F("3) +/- 8G (Default"));
+    Serial.println(F("4) +/- 16G"));
+    byte rsp = prompt("Enter the number beside the Resolution value (1-4)", 1, 4);
+    bool success = false;
+    switch (rsp)
+    {
+      case 1:
+        AccRes = 0x02;
+        success = lsm.setAccScale(lsm.LSM303_ACCSCALE_2G); 
+        if(success){Serial.println("Acc Resolution: +/- 2g");} else{Serial.println("Error writing Acc Resolution to sensor"); } break;
+      case 2:
+        AccRes = 0x04;
+        success = lsm.setAccScale(lsm.LSM303_ACCSCALE_4G); 
+        if(success){Serial.println("Acc Resolution: +/- 4g");} else{Serial.println("Error writing Acc Resolution to sensor"); } break;
+      case 3:
+        AccRes = 0x08;
+        success = lsm.setAccScale(lsm.LSM303_ACCSCALE_8G); 
+        if(success){Serial.println("Acc Resolution: +/- 8g");} else{Serial.println("Error writing Acc Resolution to sensor"); } break;    
+      case 4:
+        AccRes = 0x10;
+        success = lsm.setAccScale(lsm.LSM303_ACCSCALE_16G); 
+        if(success){Serial.println("Acc Resolution: +/- 16g");} else{Serial.println("Error writing Acc Resolution to sensor"); } break;           
+      default:
+        AccRes = 0x08;
+        success = lsm.setAccScale(lsm.LSM303_ACCSCALE_8G); 
+        if(success){Serial.println("Acc Resolution: +/- 8g");} else{Serial.println("Error writing Acc Resolution to sensor"); } break;
+    }
+    Serial.println(); 
+}
+
+/**************************************************************************/
+/*
+  This function allows the user to set the Magnetometer Gain (gauss)
+*/
+/**************************************************************************/
+void setMagRes(void)
+{
+    Serial.println();   
+    Serial.println("Set the Mag Resolution (gauss):");
+    Serial.println(F("1) +/- 1.3 gauss"));
+    Serial.println(F("2) +/- 2.5 gauss"));
+    Serial.println(F("3) +/- 4.0 gauss (Default"));
+    Serial.println(F("4) +/- 8.1 gauss"));
+    byte rsp = prompt("Enter the number beside the Resolution value (1-4)", 1, 4);
+    bool success = false;
+    switch (rsp)
+    {
+      case 1:
+        MagRes = 0x01;
+        success = lsm.setMagGain(lsm.LSM303_MAGGAIN_1_3); 
+        if(success){Serial.println("Mag Resolution: +/- 1.3 gauss");} else{Serial.println("Error writing Mag Resolution to sensor"); } break;
+      case 2:
+        MagRes = 0x02;
+        success = lsm.setMagGain(lsm.LSM303_MAGGAIN_2_5); 
+        if(success){Serial.println("Mag Resolution: +/- 2.5 gauss");} else{Serial.println("Error writing Mag Resolution to sensor"); } break;
+      case 3:
+        MagRes = 0x04;
+        success = lsm.setMagGain(lsm.LSM303_MAGGAIN_4_0); 
+        if(success){Serial.println("Mag Resolution: +/- 4 gauss");} else{Serial.println("Error writing Mag Resolution to sensor"); } break;    
+      case 4:
+        MagRes = 0x08;
+        success = lsm.setMagGain(lsm.LSM303_MAGGAIN_8_1); 
+        if(success){Serial.println("Mag Resolution: +/- 8.1 gauss");} else{Serial.println("Error writing Mag Resolution to sensor"); } break;           
+      default:
+        MagRes = 0x04;
+        success = lsm.setMagGain(lsm.LSM303_MAGGAIN_4_0); 
+        if(success){Serial.println("Mag Resolution: +/- 8g");} else{Serial.println("Error writing Mag Resolution to sensor"); } break;
     }
     Serial.println(); 
 }
@@ -1430,5 +1639,441 @@ static void log_date(TinyGPS &gps)
   }
 
   smartdelay(0);
+}
+void sfFormat(){
+  char c;
+//  Serial.begin(9600);
+//  // Wait for USB Serial 
+//  while (!Serial) {
+//    SysCall::yield();
+//  }
+  cout << F("Type any character to start\n");
+  while (!Serial.available()) {
+    SysCall::yield();
+  }
+  // Discard any extra characters.
+  do {
+    delay(10);
+  } while (Serial.available() && Serial.read() >= 0);
+  cout << F(
+         "\n"
+         "This program can erase and/or format SD/SDHC cards.\n"
+         "\n"
+         "Erase uses the card's fast flash erase command.\n"
+         "Flash erase sets all data to 0X00 for most cards\n"
+         "and 0XFF for a few vendor's cards.\n"
+         "\n"
+         "Cards larger than 2 GB will be formatted FAT32 and\n"
+         "smaller cards will be formatted FAT16.\n"
+         "\n"
+         "Warning, all data on the card will be erased.\n"
+         "Enter 'Y' to continue: ");
+  while (!Serial.available()) {
+    SysCall::yield();
+  }
+
+  c = Serial.read();
+  cout << c << endl;
+  if (c != 'Y') {
+    cout << F("Quiting, you did not enter 'Y'.\n");
+    return;
+  }
+  // Read any existing Serial data.
+  do {
+    delay(10);
+  } while (Serial.available() && Serial.read() >= 0);
+
+  cout << F(
+         "\n"
+         "Options are:\n"
+         "E - erase the card and skip formatting.\n"
+         "F - erase and then format the card. (recommended)\n"
+         "Q - quick format the card without erase.\n"
+         "\n"
+         "Enter option: ");
+
+  while (!Serial.available()) {
+    SysCall::yield();
+  }
+  c = Serial.read();
+  cout << c << endl;
+  if (!strchr("EFQ", c)) {
+    cout << F("Quiting, invalid option entered.") << endl;
+    return;
+  }
+
+  if (!card.begin(cardSelect, spiSpeed)) {
+    cout << F(
+           "\nSD initialization failure!\n"
+           "Is the SD card inserted correctly?\n"
+           "Is chip select correct at the top of this program?\n");
+    sdError("card.begin failed");
+  }
+  cardSizeBlocks = card.cardSize();
+  if (cardSizeBlocks == 0) {
+    sdError("cardSize");
+  }
+  cardCapacityMB = (cardSizeBlocks + 2047)/2048;
+
+  cout << F("Card Size: ") << setprecision(0) << 1.048576*cardCapacityMB;
+  cout << F(" MB, (MB = 1,000,000 bytes)") << endl;
+
+  if (c == 'E' || c == 'F') {
+    eraseCard();
+  }
+  if (c == 'F' || c == 'Q') {
+    formatCard();
+  }
+  
+}
+
+void sdError_F(const __FlashStringHelper* str) {
+  cout << F("error: ");
+  cout << str << endl;
+  if (card.errorCode()) {
+    cout << F("SD error: ") << hex << int(card.errorCode());
+    cout << ',' << int(card.errorData()) << dec << endl;
+  }
+  SysCall::halt();
+}
+
+// write cached block to the card
+uint8_t writeCache(uint32_t lbn) {
+  return card.writeBlock(lbn, cache.data);
+}
+//------------------------------------------------------------------------------
+// initialize appropriate sizes for SD capacity
+void initSizes() {
+  if (cardCapacityMB <= 6) {
+    sdError("Card is too small.");
+  } else if (cardCapacityMB <= 16) {
+    sectorsPerCluster = 2;
+  } else if (cardCapacityMB <= 32) {
+    sectorsPerCluster = 4;
+  } else if (cardCapacityMB <= 64) {
+    sectorsPerCluster = 8;
+  } else if (cardCapacityMB <= 128) {
+    sectorsPerCluster = 16;
+  } else if (cardCapacityMB <= 1024) {
+    sectorsPerCluster = 32;
+  } else if (cardCapacityMB <= 32768) {
+    sectorsPerCluster = 64;
+  } else {
+    // SDXC cards
+    sectorsPerCluster = 128;
+  }
+
+  cout << F("Blocks/Cluster: ") << int(sectorsPerCluster) << endl;
+  // set fake disk geometry
+  sectorsPerTrack = cardCapacityMB <= 256 ? 32 : 63;
+
+  if (cardCapacityMB <= 16) {
+    numberOfHeads = 2;
+  } else if (cardCapacityMB <= 32) {
+    numberOfHeads = 4;
+  } else if (cardCapacityMB <= 128) {
+    numberOfHeads = 8;
+  } else if (cardCapacityMB <= 504) {
+    numberOfHeads = 16;
+  } else if (cardCapacityMB <= 1008) {
+    numberOfHeads = 32;
+  } else if (cardCapacityMB <= 2016) {
+    numberOfHeads = 64;
+  } else if (cardCapacityMB <= 4032) {
+    numberOfHeads = 128;
+  } else {
+    numberOfHeads = 255;
+  }
+}
+//------------------------------------------------------------------------------
+// zero cache and optionally set the sector signature
+void clearCache(uint8_t addSig) {
+  memset(&cache, 0, sizeof(cache));
+  if (addSig) {
+    cache.mbr.mbrSig0 = BOOTSIG0;
+    cache.mbr.mbrSig1 = BOOTSIG1;
+  }
+}
+//------------------------------------------------------------------------------
+// zero FAT and root dir area on SD
+void clearFatDir(uint32_t bgn, uint32_t count) {
+  clearCache(false);
+  if (!card.writeStart(bgn, count)) {
+    sdError("Clear FAT/DIR writeStart failed");
+  }
+  for (uint32_t i = 0; i < count; i++) {
+    if ((i & 0XFF) == 0) {
+      cout << '.';
+    }
+    if (!card.writeData(cache.data)) {
+      sdError("Clear FAT/DIR writeData failed");
+    }
+  }
+  if (!card.writeStop()) {
+    sdError("Clear FAT/DIR writeStop failed");
+  }
+  cout << endl;
+}
+//------------------------------------------------------------------------------
+// return cylinder number for a logical block number
+uint16_t lbnToCylinder(uint32_t lbn) {
+  return lbn / (numberOfHeads * sectorsPerTrack);
+}
+//------------------------------------------------------------------------------
+// return head number for a logical block number
+uint8_t lbnToHead(uint32_t lbn) {
+  return (lbn % (numberOfHeads * sectorsPerTrack)) / sectorsPerTrack;
+}
+//------------------------------------------------------------------------------
+// return sector number for a logical block number
+uint8_t lbnToSector(uint32_t lbn) {
+  return (lbn % sectorsPerTrack) + 1;
+}
+//------------------------------------------------------------------------------
+// format and write the Master Boot Record
+void writeMbr() {
+  clearCache(true);
+  part_t* p = cache.mbr.part;
+  p->boot = 0;
+  uint16_t c = lbnToCylinder(relSector);
+  if (c > 1023) {
+    sdError("MBR CHS");
+  }
+  p->beginCylinderHigh = c >> 8;
+  p->beginCylinderLow = c & 0XFF;
+  p->beginHead = lbnToHead(relSector);
+  p->beginSector = lbnToSector(relSector);
+  p->type = partType;
+  uint32_t endLbn = relSector + partSize - 1;
+  c = lbnToCylinder(endLbn);
+  if (c <= 1023) {
+    p->endCylinderHigh = c >> 8;
+    p->endCylinderLow = c & 0XFF;
+    p->endHead = lbnToHead(endLbn);
+    p->endSector = lbnToSector(endLbn);
+  } else {
+    // Too big flag, c = 1023, h = 254, s = 63
+    p->endCylinderHigh = 3;
+    p->endCylinderLow = 255;
+    p->endHead = 254;
+    p->endSector = 63;
+  }
+  p->firstSector = relSector;
+  p->totalSectors = partSize;
+  if (!writeCache(0)) {
+    sdError("write MBR");
+  }
+}
+//------------------------------------------------------------------------------
+// generate serial number from card size and micros since boot
+uint32_t volSerialNumber() {
+  return (cardSizeBlocks << 8) + micros();
+}
+//------------------------------------------------------------------------------
+// format the SD as FAT16
+void makeFat16() {
+  uint32_t nc;
+  for (dataStart = 2 * BU16;; dataStart += BU16) {
+    nc = (cardSizeBlocks - dataStart)/sectorsPerCluster;
+    fatSize = (nc + 2 + 255)/256;
+    uint32_t r = BU16 + 1 + 2 * fatSize + 32;
+    if (dataStart < r) {
+      continue;
+    }
+    relSector = dataStart - r + BU16;
+    break;
+  }
+  // check valid cluster count for FAT16 volume
+  if (nc < 4085 || nc >= 65525) {
+    sdError("Bad cluster count");
+  }
+  reservedSectors = 1;
+  fatStart = relSector + reservedSectors;
+  partSize = nc * sectorsPerCluster + 2 * fatSize + reservedSectors + 32;
+  if (partSize < 32680) {
+    partType = 0X01;
+  } else if (partSize < 65536) {
+    partType = 0X04;
+  } else {
+    partType = 0X06;
+  }
+  // write MBR
+  writeMbr();
+  clearCache(true);
+  fat_boot_t* pb = &cache.fbs;
+  pb->jump[0] = 0XEB;
+  pb->jump[1] = 0X00;
+  pb->jump[2] = 0X90;
+  for (uint8_t i = 0; i < sizeof(pb->oemId); i++) {
+    pb->oemId[i] = ' ';
+  }
+  pb->bytesPerSector = 512;
+  pb->sectorsPerCluster = sectorsPerCluster;
+  pb->reservedSectorCount = reservedSectors;
+  pb->fatCount = 2;
+  pb->rootDirEntryCount = 512;
+  pb->mediaType = 0XF8;
+  pb->sectorsPerFat16 = fatSize;
+  pb->sectorsPerTrack = sectorsPerTrack;
+  pb->headCount = numberOfHeads;
+  pb->hidddenSectors = relSector;
+  pb->totalSectors32 = partSize;
+  pb->driveNumber = 0X80;
+  pb->bootSignature = EXTENDED_BOOT_SIG;
+  pb->volumeSerialNumber = volSerialNumber();
+  memcpy(pb->volumeLabel, noName, sizeof(pb->volumeLabel));
+  memcpy(pb->fileSystemType, fat16str, sizeof(pb->fileSystemType));
+  // write partition boot sector
+  if (!writeCache(relSector)) {
+    sdError("FAT16 write PBS failed");
+  }
+  // clear FAT and root directory
+  clearFatDir(fatStart, dataStart - fatStart);
+  clearCache(false);
+  cache.fat16[0] = 0XFFF8;
+  cache.fat16[1] = 0XFFFF;
+  // write first block of FAT and backup for reserved clusters
+  if (!writeCache(fatStart)
+      || !writeCache(fatStart + fatSize)) {
+    sdError("FAT16 reserve failed");
+  }
+}
+//------------------------------------------------------------------------------
+// format the SD as FAT32
+void makeFat32() {
+  uint32_t nc;
+  relSector = BU32;
+  for (dataStart = 2 * BU32;; dataStart += BU32) {
+    nc = (cardSizeBlocks - dataStart)/sectorsPerCluster;
+    fatSize = (nc + 2 + 127)/128;
+    uint32_t r = relSector + 9 + 2 * fatSize;
+    if (dataStart >= r) {
+      break;
+    }
+  }
+  // error if too few clusters in FAT32 volume
+  if (nc < 65525) {
+    sdError("Bad cluster count");
+  }
+  reservedSectors = dataStart - relSector - 2 * fatSize;
+  fatStart = relSector + reservedSectors;
+  partSize = nc * sectorsPerCluster + dataStart - relSector;
+  // type depends on address of end sector
+  // max CHS has lbn = 16450560 = 1024*255*63
+  if ((relSector + partSize) <= 16450560) {
+    // FAT32
+    partType = 0X0B;
+  } else {
+    // FAT32 with INT 13
+    partType = 0X0C;
+  }
+  writeMbr();
+  clearCache(true);
+
+  fat32_boot_t* pb = &cache.fbs32;
+  pb->jump[0] = 0XEB;
+  pb->jump[1] = 0X00;
+  pb->jump[2] = 0X90;
+  for (uint8_t i = 0; i < sizeof(pb->oemId); i++) {
+    pb->oemId[i] = ' ';
+  }
+  pb->bytesPerSector = 512;
+  pb->sectorsPerCluster = sectorsPerCluster;
+  pb->reservedSectorCount = reservedSectors;
+  pb->fatCount = 2;
+  pb->mediaType = 0XF8;
+  pb->sectorsPerTrack = sectorsPerTrack;
+  pb->headCount = numberOfHeads;
+  pb->hidddenSectors = relSector;
+  pb->totalSectors32 = partSize;
+  pb->sectorsPerFat32 = fatSize;
+  pb->fat32RootCluster = 2;
+  pb->fat32FSInfo = 1;
+  pb->fat32BackBootBlock = 6;
+  pb->driveNumber = 0X80;
+  pb->bootSignature = EXTENDED_BOOT_SIG;
+  pb->volumeSerialNumber = volSerialNumber();
+  memcpy(pb->volumeLabel, noName, sizeof(pb->volumeLabel));
+  memcpy(pb->fileSystemType, fat32str, sizeof(pb->fileSystemType));
+  // write partition boot sector and backup
+  if (!writeCache(relSector)
+      || !writeCache(relSector + 6)) {
+    sdError("FAT32 write PBS failed");
+  }
+  clearCache(true);
+  // write extra boot area and backup
+  if (!writeCache(relSector + 2)
+      || !writeCache(relSector + 8)) {
+    sdError("FAT32 PBS ext failed");
+  }
+  fat32_fsinfo_t* pf = &cache.fsinfo;
+  pf->leadSignature = FSINFO_LEAD_SIG;
+  pf->structSignature = FSINFO_STRUCT_SIG;
+  pf->freeCount = 0XFFFFFFFF;
+  pf->nextFree = 0XFFFFFFFF;
+  // write FSINFO sector and backup
+  if (!writeCache(relSector + 1)
+      || !writeCache(relSector + 7)) {
+    sdError("FAT32 FSINFO failed");
+  }
+  clearFatDir(fatStart, 2 * fatSize + sectorsPerCluster);
+  clearCache(false);
+  cache.fat32[0] = 0x0FFFFFF8;
+  cache.fat32[1] = 0x0FFFFFFF;
+  cache.fat32[2] = 0x0FFFFFFF;
+  // write first block of FAT and backup for reserved clusters
+  if (!writeCache(fatStart)
+      || !writeCache(fatStart + fatSize)) {
+    sdError("FAT32 reserve failed");
+  }
+}
+//------------------------------------------------------------------------------
+// flash erase all data
+void eraseCard() {
+  cout << endl << F("Erasing\n");
+  uint32_t firstBlock = 0;
+  uint32_t lastBlock;
+  uint16_t n = 0;
+
+  do {
+    lastBlock = firstBlock + ERASE_SIZE - 1;
+    if (lastBlock >= cardSizeBlocks) {
+      lastBlock = cardSizeBlocks - 1;
+    }
+    if (!card.erase(firstBlock, lastBlock)) {
+      sdError("erase failed");
+    }
+    cout << '.';
+    if ((n++)%32 == 31) {
+      cout << endl;
+    }
+    firstBlock += ERASE_SIZE;
+  } while (firstBlock < cardSizeBlocks);
+  cout << endl;
+
+  if (!card.readBlock(0, cache.data)) {
+    sdError("readBlock");
+  }
+  cout << hex << showbase << setfill('0') << internal;
+  cout << F("All data set to ") << setw(4) << int(cache.data[0]) << endl;
+  cout << dec << noshowbase << setfill(' ') << right;
+  cout << F("Erase done\n");
+}
+//------------------------------------------------------------------------------
+void formatCard() {
+  cout << endl;
+  cout << F("Formatting\n");
+  initSizes();
+  if (card.type() != SD_CARD_TYPE_SDHC) {
+    cout << F("FAT16\n");
+    makeFat16();
+  } else {
+    cout << F("FAT32\n");
+    makeFat32();
+  }
+#if DEBUG_PRINT
+  debugPrint();
+#endif  // DEBUG_PRINT
+  cout << F("Format done\n");
 }
 
