@@ -46,12 +46,10 @@
 
  Power Consumption: 
  500mAh Battery - ~39hrs @ 5min GPS, ~32hrs @ 2min GPS, ~26hrs @ 1min (50Hz ACC/Mag)
- 
 */
 
 // ToDo~!!
 // *** Add fix delay option (Much like a start delay but determined by gps fix) ***
-// Check if AdafruitSensor and be removed
 // Sensitivity testing of variables like timeout, number of samples to collect, MS smart delay
 // Retick running at 20ms is actually taking 20.xxx milliseconds, which results in a sample to be missed once every 20 seconds
 
@@ -70,7 +68,7 @@
 // GPS Settings
 #define GPS_TIMEOUT         60 // Seconds to wait for a fix to be logged before sleeping
 #define GPS_SAMPLING_RATE  120 // Seconds of GPS sleep between data acquisition
-#define GPS_DELAY_READ       8 // Seconds to wait before trying to log - allows for a fix
+#define GPS_DELAY_READ       5 // Seconds to wait before trying to log - allows for a fix
 #define LOOP_MAX_VAL         1 // Number of GPS reads before sleeping
 #define SMART_DELAY_MS      10 // Number of milliseconds to spend encoding GPS data between other instructions
 
@@ -80,7 +78,6 @@
 SdFat SD;
 #include <Wire.h>
 #include <SPI.h>
-//#include <Adafruit_Sensor.h>   //General sensor library for Adafruit
 #include <TW_LSM303v2.h>       //library for Accel Mag Sensor LSM 303, updated
 #include <TinyGPS.h>
 //Libraries for ReTick
@@ -106,11 +103,11 @@ bool gpsStandby = false;
 unsigned int gpscount = 0;
 bool endGPSRead = false;
 bool logGPS = false; 
-unsigned short gpsRate = GPS_SAMPLING_RATE; // Seconds of GPS sleep between data acquisition
-unsigned short gpsTimeOut = GPS_TIMEOUT;    // Seconds to wait for a fix to be logged before sleeping
-unsigned short gpsDelay = GPS_DELAY_READ;   // Seconds to wait before trying to log - allows for a fix
-byte loopMaxGPS = LOOP_MAX_VAL;             // Number of GPS reads before sleeping
-unsigned long smartDelayMS = SMART_DELAY_MS;// Number of milliseconds to spend encoding GPS data between other instructions
+long gpsRate = GPS_SAMPLING_RATE; // Seconds of GPS sleep between data acquisition
+long gpsTimeOut = GPS_TIMEOUT;    // Seconds to wait for a fix to be logged before sleeping
+long gpsDelay = GPS_DELAY_READ;   // Seconds to wait before trying to log - allows for a fix
+long loopMaxGPS = LOOP_MAX_VAL;             // Number of GPS reads before sleeping
+long smartDelayMS = SMART_DELAY_MS;// Number of milliseconds to spend encoding GPS data between other instructions
 unsigned int  loopCounter  = 0;             // Loop counter
 unsigned int readCount = 0;
 unsigned int hzGPSLog = 0;
@@ -549,9 +546,7 @@ void WriteToSD() {
       smartdelay(smartDelayMS); // Do - While Loop to read and encode GPS
       #ifdef GPSECHO 
         GPS.stats(&chars, &sentences, &failed);
-        Serial.println(chars);
-        Serial.println(sentences);
-        Serial.println(failed);
+        Serial.print("Characters: "); Serial.print(chars); Serial.print(", Sentences: "); Serial.print(sentences); Serial.print(", Failed: "); Serial.println(failed);
       #endif
       GPS.get_position(&lat, &lon, &fixage);  // lat/long in MILLIONTHs of a degree and age of fix in milliseconds    
       sats = GPS.satellites(); //make sure valid satellites before logging 
@@ -912,11 +907,11 @@ void parseMenu(char c)
     it if it's within a valid range.
 */
 /**************************************************************************/
-byte prompt(String ask, int mini, int maxi)
+long prompt(String ask, long mini, long maxi)
 {
   Serial.print(ask + "? ");
   while (!Serial.available()) ; // Wait for numbers to come in
-  byte rsp = Serial.parseInt();
+  long rsp = Serial.parseInt();
   if ((rsp >= mini) && (rsp <= maxi))
   {
     Serial.println(rsp);
@@ -1063,7 +1058,7 @@ void setSamplingRate(void)
     {
       case 1:
         samplingRate = 1000;
-        smartDelayMS = 200; // Expand the GPS listening time 
+        smartDelayMS = 700; // Expand the GPS listening time 
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_1HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_1_5HZ); 
         if(success1 && success2){ Serial.println("Sampling Rate: 1Hz"); AccODR = 0x01; MagODR = 0x01; } 
@@ -1071,7 +1066,7 @@ void setSamplingRate(void)
         break;
       case 2:
         samplingRate = 200; 
-        smartDelayMS = 50; // Expand the GPS listening time 
+        smartDelayMS = 100; // Expand the GPS listening time 
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_10HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_7_5HZ);         
         if(success1 && success2){ Serial.println("Sampling Rate: 5Hz"); AccODR = 0x0A; MagODR = 0x07;} 
@@ -1079,7 +1074,7 @@ void setSamplingRate(void)
         break;
       case 3:
         samplingRate = 100; 
-        smartDelayMS = SMART_DELAY_MS;
+        smartDelayMS = 60;
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_25HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_15HZ);         
         if(success1 && success2){ Serial.println("Sampling Rate: 10Hz"); AccODR = 0x19; MagODR = 0x0F;} 
@@ -1087,7 +1082,7 @@ void setSamplingRate(void)
         break;
       case 4:
         samplingRate = 40; 
-        smartDelayMS = SMART_DELAY_MS;
+        smartDelayMS = 20;
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_25HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_30HZ); 
         if(success1 && success2){ Serial.println("Sampling Rate: 25Hz"); AccODR = 0x19; MagODR = 0x1E;} 
@@ -1111,6 +1106,7 @@ void setSamplingRate(void)
         break;
  /*   case 7: // Not implemented in this version
         samplingRate = 10; 
+        smartDelayMS = SMART_DELAY_MS; 
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_200HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_75HZ); 
         if(success1 && success2){ Serial.println("Sampling Rate: 100Hz"); AccODR = 0xC8; MagODR = 0x4B;} 
@@ -1424,11 +1420,11 @@ void setGPS(void)
     i3 = prompt("0 = No, 1 = Yes", 0, 1);  
     Serial.println();
     if(i3 != 0){  
-      gpsRate = prompt("GPS Sampling Rate(seconds) - default is 120", 1, 600);       // Seconds of GPS sleep between data acquisition
-      gpsTimeOut = prompt("GPS Timeout(seconds) - default is 60", 20, 90);           // Seconds to wait for a fix to be logged before sleeping
-      gpsDelay = prompt("GPS Read Delay(seconds) - default is 8", 1, 30);            // Seconds to wait before trying to log - allows for a fix
-      loopMaxGPS = prompt("GPS Samples per logging interval - default is 1", 1, 30); // Number of GPS reads before sleeping
-      smartDelayMS = prompt("GPS Smart Delay(milliseconds) - default is 10", 1, 20); // Number of milliseconds to spend encoding GPS data between other instructions
+      gpsRate = prompt("GPS Sampling Rate(seconds) - default is 120 (min 1, max 3600)", 1, 3600); delay(20);     // Seconds of GPS sleep between data acquisition
+      gpsTimeOut = prompt("GPS Timeout(seconds) - default is 60 (min 20, max 90)", 20, 90); delay(20);           // Seconds to wait for a fix to be logged before sleeping
+      gpsDelay = prompt("GPS Read Delay(seconds) - default is 5 (min 1, max 30)", 1, 30); delay(20);             // Seconds to wait before trying to log - allows for a fix
+      loopMaxGPS = prompt("GPS Samples per logging interval - default is 1 (min 1, max 10)", 1, 10); delay(20);   // Number of GPS reads before sleeping
+      //smartDelayMS = prompt("GPS Smart Delay(milliseconds) - default is 10 (min 5, max 500)", 5, 500); delay(20);// Number of milliseconds to spend encoding GPS data between other instructions
     }
 }
 
@@ -1629,9 +1625,9 @@ static void log_date(TinyGPS &gps)
   int yearGPS;
   byte monthGPS, dayGPS, hourGPS, minuteGPS, secondGPS, hundredthsGPS;
   unsigned long age;
-  GPS.crack_datetime(&yearGPS, &monthGPS, &dayGPS, &hourGPS, &minuteGPS, &secondGPS, &hundredthsGPS, &age);
-  // check for 00/00/2000
-  if (age == TinyGPS::GPS_INVALID_AGE || monthGPS == 0) {
+  GPS.crack_datetime(&yearGPS, &monthGPS, &dayGPS, &hourGPS, &minuteGPS, &secondGPS, &hundredthsGPS, &age);  
+  // check for 00/00/2000 and a fix within the sampling period
+  if (age == TinyGPS::GPS_INVALID_AGE || monthGPS == 0 || age > (gpsRate*1000)) {
     logGPS=false;
   }
   else
