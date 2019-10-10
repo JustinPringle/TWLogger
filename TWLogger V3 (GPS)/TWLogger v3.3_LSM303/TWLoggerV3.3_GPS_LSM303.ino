@@ -51,10 +51,8 @@
 
 // ToDo~!!
 // *** Add fix delay option (Much like a start delay but determined by gps fix) ***
-// Add sampling rate change in sensors when different retick rate is selected.
 // Check if AdafruitSensor and be removed
 // Sensitivity testing of variables like timeout, number of samples to collect, MS smart delay
-// Can I correct for slight drift in the sampling rate by changing where the time is checked
 // Retick running at 20ms is actually taking 20.xxx milliseconds, which results in a sample to be missed once every 20 seconds
 
 
@@ -82,7 +80,7 @@
 SdFat SD;
 #include <Wire.h>
 #include <SPI.h>
-#include <Adafruit_Sensor.h>   //General sensor library for Adafruit
+//#include <Adafruit_Sensor.h>   //General sensor library for Adafruit
 #include <TW_LSM303v2.h>       //library for Accel Mag Sensor LSM 303, updated
 #include <TinyGPS.h>
 //Libraries for ReTick
@@ -112,7 +110,7 @@ unsigned short gpsRate = GPS_SAMPLING_RATE; // Seconds of GPS sleep between data
 unsigned short gpsTimeOut = GPS_TIMEOUT;    // Seconds to wait for a fix to be logged before sleeping
 unsigned short gpsDelay = GPS_DELAY_READ;   // Seconds to wait before trying to log - allows for a fix
 byte loopMaxGPS = LOOP_MAX_VAL;             // Number of GPS reads before sleeping
-byte smartDelayMS = SMART_DELAY_MS;         // Number of milliseconds to spend encoding GPS data between other instructions
+unsigned long smartDelayMS = SMART_DELAY_MS;// Number of milliseconds to spend encoding GPS data between other instructions
 unsigned int  loopCounter  = 0;             // Loop counter
 unsigned int readCount = 0;
 unsigned int hzGPSLog = 0;
@@ -1028,8 +1026,7 @@ void setIMU(void)
       case 0:
         break;
       case 1:
-        setSamplingRate(); 
-        break;
+        setSamplingRate(); break;
       case 2:
         setAccRes(); break;
       case 3:
@@ -1066,13 +1063,15 @@ void setSamplingRate(void)
     {
       case 1:
         samplingRate = 1000;
+        smartDelayMS = 200; // Expand the GPS listening time 
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_1HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_1_5HZ); 
-        if(success1 && success2){ Serial.println("Sampling Rate: 1Hz"); AccODR = 0x01; MagODR = 0x01;} 
+        if(success1 && success2){ Serial.println("Sampling Rate: 1Hz"); AccODR = 0x01; MagODR = 0x01; } 
         else{ Serial.println("Error writing sampling rate to sensors");} 
         break;
       case 2:
         samplingRate = 200; 
+        smartDelayMS = 50; // Expand the GPS listening time 
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_10HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_7_5HZ);         
         if(success1 && success2){ Serial.println("Sampling Rate: 5Hz"); AccODR = 0x0A; MagODR = 0x07;} 
@@ -1080,6 +1079,7 @@ void setSamplingRate(void)
         break;
       case 3:
         samplingRate = 100; 
+        smartDelayMS = SMART_DELAY_MS;
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_25HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_15HZ);         
         if(success1 && success2){ Serial.println("Sampling Rate: 10Hz"); AccODR = 0x19; MagODR = 0x0F;} 
@@ -1087,6 +1087,7 @@ void setSamplingRate(void)
         break;
       case 4:
         samplingRate = 40; 
+        smartDelayMS = SMART_DELAY_MS;
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_25HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_30HZ); 
         if(success1 && success2){ Serial.println("Sampling Rate: 25Hz"); AccODR = 0x19; MagODR = 0x1E;} 
@@ -1094,6 +1095,7 @@ void setSamplingRate(void)
         break;
       case 5:
         samplingRate = 25; 
+        smartDelayMS = SMART_DELAY_MS;
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_50HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_75HZ);         
         if(success1 && success2){ Serial.println("Sampling Rate: 40Hz"); AccODR = 0x32; MagODR = 0x4B;} 
@@ -1101,6 +1103,7 @@ void setSamplingRate(void)
         break;
       case 6:
         samplingRate = 20; 
+        smartDelayMS = SMART_DELAY_MS;
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_100HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_75HZ);         
         if(success1 && success2){ Serial.println("Sampling Rate: 50Hz"); AccODR = 0x64; MagODR = 0x4B;} 
@@ -1113,7 +1116,8 @@ void setSamplingRate(void)
         if(success1 && success2){ Serial.println("Sampling Rate: 100Hz"); AccODR = 0xC8; MagODR = 0x4B;} 
         else{ Serial.println("Error writing sampling rate to sensors"); } break; */
       default:
-        samplingRate = 20; 
+        samplingRate = 20;
+        smartDelayMS = SMART_DELAY_MS; 
         success1 = lsm.setAccODR(lsm.LSM303_ACCODR_100HZ);
         success2 = lsm.setMagODR(lsm.LSM303_MAGODR_75HZ);         
         if(success1 && success2){ Serial.println("Sampling Rate: 50Hz"); AccODR = 0x64; MagODR = 0x4B;} 
