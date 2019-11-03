@@ -1,0 +1,32 @@
+Tapered Wings Logger
+Version 3.1.1
+
+Tag Number: 1
+
+Initiation Timestamp: 7/8/2018 12:54:40
+Timezone Offset: +00
+
+----------Key Settings----------
+Number of Samples before Flush() is called: 2000
+Number of Samples per CSV file: 500000
+Sampling Rate: 50Hz
+
+GPS Settings:
+GPS Sampling Rate (seconds): 120
+GPS Timeout (seconds): 60
+GPS Read Delay (seconds): 8
+GPS Samples per logging interval: 1
+GPS Smart Delay (milliseconds): 8
+
+
+Associated Log Files:
+T1D0708-00.CSV
+T1D0708-01.CSV
+T1D0708-02.CSV
+T1D0708-03.CSV
+T1D0708-04.CSV
+T1D0708-05.CSV
+T1D0708-06.CSV
+T1D0708-07.CSV
+T1D0708-08.CSV
+T1D0708-09.CSV
