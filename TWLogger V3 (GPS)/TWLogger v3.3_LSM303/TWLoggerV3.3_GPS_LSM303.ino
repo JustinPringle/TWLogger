@@ -43,6 +43,7 @@
  Added Plotter Output 1/31/19
  Better GPS Error Checking 8/18/19
  Added functionality to change sensor settings (ODR, scale and gain) 10/8/19
+ Added Acceleration and Magnetic field conversion to real units in plotter 4/8/20
 
  Power Consumption: 
  500mAh Battery - ~39hrs @ 5min GPS, ~32hrs @ 2min GPS, ~26hrs @ 1min (50Hz ACC/Mag)
@@ -53,12 +54,11 @@
 // Sensitivity testing of variables like timeout, number of samples to collect, MS smart delay
 // Retick running at 20ms is actually taking 20.xxx milliseconds, which results in a sample to be missed once every 20 seconds
 
-
 //////////////// Key Settings /////////////////////////////////
 #define vers "Version 3.3"
 //#define ECHO_TO_SERIAL       // Allows serial output if uncommented
-//#define ECHO_ACC_PLOTTER     // Serial output of just ACC for plotter display 
-//#define ECHO_MAG_PLOTTER     // Serial output of just ACC for plotter display
+//#define ECHO_ACC_PLOTTER     // Serial output of just ACC for plotter display (plots in meters/second^2)
+//#define ECHO_MAG_PLOTTER     // Serial output of just ACC for plotter display (plots in micro Teslas)
 //#define GPSECHO              // Echo the GPS data to the Serial console
 //#define Gyro_On              // Allows Gyro output if uncommented
 #define MinutesPerCycle 1      // Number of Minutes to buffer before uSD card flush is called. 
@@ -325,7 +325,6 @@ void setup() {
     Serial.end();
   }
   delay(500);
-  
   #ifdef ECHO_TO_SERIAL
     while (! Serial); // Wait until Serial is ready
     Serial.begin(115200);
@@ -511,12 +510,17 @@ void WriteToSD() {
    *   event->acceleration.x *= SENSORS_GRAVITY_STANDARD;
    */
   lsm.readAccel();
+  #ifdef ECHO_ACC_PLOTTER
+    lsm.readAccel_ms2();
+  #endif
   /*   These are Raw values, Calculated values can be obtained by:
    *   event->magnetic.x = magData.x * _mag_mgauss_lsb;
    *   event->magnetic.x /= 1000; 
    */
   lsm.readMag();
- 
+  #ifdef ECHO_MAG_PLOTTER
+    lsm.readMag_mT();
+  #endif
   #ifdef Gyro_On  
   /*   These are Raw values, Calculated values can be obtained by:
    *   event->gyro.x = gyroData.x * _gyro_dps_digit;
@@ -682,10 +686,10 @@ void SerialOutput() {
 // Very simple display for plotter
 void PlotterOutput() {
   #ifdef ECHO_ACC_PLOTTER
-    Serial.print(lsm.accelData.x); Serial.print(" "); Serial.print(lsm.accelData.y); Serial.print(" "); Serial.print(lsm.accelData.z); Serial.println();
+    Serial.print(lsm.accelData_ms2.x); Serial.print(" "); Serial.print(lsm.accelData_ms2.y); Serial.print(" "); Serial.print(lsm.accelData_ms2.z); Serial.println();
   #endif
   #ifdef ECHO_MAG_PLOTTER
-    Serial.print(lsm.magData.x); Serial.print(" "); Serial.print(lsm.magData.y); Serial.print(" "); Serial.print(lsm.magData.z); Serial.println();
+    Serial.print(lsm.magData_mT.x); Serial.print(" "); Serial.print(lsm.magData_mT.y); Serial.print(" "); Serial.print(lsm.magData_mT.z); Serial.println();
   #endif 
 }
 

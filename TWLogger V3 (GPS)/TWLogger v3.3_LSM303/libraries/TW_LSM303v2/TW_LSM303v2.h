@@ -15,12 +15,13 @@
 
 /***************************************************************************
   Tapered Wings Logger Updates to Adafruit Library
-  Version 2 (10/9/2019)
+  Version 2 (4/8/2020)
   James Fahlbusch
   Stanford University
 
   Notes:
   Added functionality to change sensor settings (ODR, scale and gain)
+  Adjusted ACC mg per LSB values based on the datasheet 
 ***************************************************************************/ 
 
 #ifndef __LSM303_H__
@@ -38,11 +39,10 @@
 #define LSM303_ID                     (0b11010100)
 
 // Linear Acceleration: mg per LSB
-#define LSM303_ACCEL_MG_LSB_2G (0.061F)
-#define LSM303_ACCEL_MG_LSB_4G (0.122F)
-#define LSM303_ACCEL_MG_LSB_6G (0.183F)
-#define LSM303_ACCEL_MG_LSB_8G (0.244F)
-#define LSM303_ACCEL_MG_LSB_16G (0.732F) // Is this right? Was expecting 0.488F
+#define LSM303_ACCEL_MG_LSB_2G (0.001F)
+#define LSM303_ACCEL_MG_LSB_4G (0.002F)
+#define LSM303_ACCEL_MG_LSB_8G (0.004F)
+#define LSM303_ACCEL_MG_LSB_16G (0.012F) 
 
 // Magnetic Field Strength: gauss range
 #define LSM303_MAG_MGAUSS_2GAUSS      (0.08F)
@@ -50,6 +50,16 @@
 #define LSM303_MAG_MGAUSS_8GAUSS      (0.32F)
 #define LSM303_MAG_MGAUSS_12GAUSS     (0.48F)
 
+// Gravity Standards
+#define SENSORS_GRAVITY_EARTH (9.80665F) /**< Earth's gravity in m/s^2 */
+#define SENSORS_GRAVITY_MOON (1.6F)      /**< The moon's gravity in m/s^2 */
+#define SENSORS_GRAVITY_SUN (275.0F)     /**< The sun's gravity in m/s^2 */
+#define SENSORS_GRAVITY_STANDARD (SENSORS_GRAVITY_EARTH)
+
+// Magnetic Field Standards
+#define SENSORS_MAGFIELD_EARTH_MAX (60.0F) /**< Maximum magnetic field on Earth's surface */
+#define SENSORS_MAGFIELD_EARTH_MIN (30.0F) /**< Minimum magnetic field on Earth's surface */
+#define SENSORS_GAUSS_TO_MICROTESLA (100)  /**< Gauss to micro-Tesla multiplier */
 
 // Temperature: LSB per degree celsius
 #define LSM303_TEMP_LSB_DEGREE_CELSIUS    (8)  // 1°C = 8, 25° = 200, etc.
@@ -148,6 +158,22 @@ class TW_LSM303v2
     LSM303_MAGODR_30HZ                        = 0x94,  //  30 Hz
     LSM303_MAGODR_75HZ                        = 0x98,  //  75 Hz
   } lsm303MagODR;
+/*=========================================================================
+    MAGNETOMETER UPDATE RATE SETTINGS
+    -----------------------------------------------------------------------*/
+    typedef enum
+    {
+      LSM303_MAGRATE_0_7                        = 0x00,  // 0.75 Hz
+      LSM303_MAGRATE_1_5                        = 0x01,  // 1.5 Hz
+      LSM303_MAGRATE_3_0                        = 0x62,  // 3.0 Hz
+      LSM303_MAGRATE_7_5                        = 0x03,  // 7.5 Hz
+      LSM303_MAGRATE_15                         = 0x04,  // 15 Hz
+      LSM303_MAGRATE_30                         = 0x05,  // 30 Hz
+      LSM303_MAGRATE_75                         = 0x06,  // 75 Hz
+      LSM303_MAGRATE_220                        = 0x07   // 200 Hz
+    } lsm303MagRate;
+/*=========================================================================*/
+
 
     typedef struct lsm303AccelData_s
     { // Return integer raw values
@@ -155,6 +181,13 @@ class TW_LSM303v2
       int16_t y; //float y;
       int16_t z; //float z;
     } lsm303AccelData;
+
+    typedef struct lsm303AccelData_ms2_s
+    { // Return float values in m/s^2
+      float x;
+      float y;
+      float z;
+    } lsm303AccelData_ms2;
 	
 	typedef struct lsm303MagData_s
 	{ // Return integer raw values
@@ -163,22 +196,33 @@ class TW_LSM303v2
       int16_t z; //float z;
 	} lsm303MagData;
 
+  typedef struct lsm303MagData_mT_s
+  { // Return float values in micro Teslas
+      float x;
+      float y;
+      float z;
+  } lsm303MagData_mT;
+
   bool begin(void);
   void readAccel(void);
+  void readAccel_ms2(void);
   void readMag(void);
+  void readMag_mT(void);
   void readTemp(void);
   bool setAccScale(lsm303AccScale scale);
 	bool setMagGain(lsm303MagGain gain);
   bool setAccODR(lsm303AccODR accODR);
   bool setMagODR(lsm303MagODR magODR);
 
-  lsm303AccelData accelData;    // Last read accelerometer data will be available here
-  lsm303MagData magData;        // Last read magnetometer data will be available here
-  int16_t temperature;          // Last read temperature data will be available here
-
-
-    void write8(byte address, byte reg, byte value);
-    byte read8(byte address, byte reg);
+  lsm303AccelData accelData;          // Last read accelerometer data will be available here (Raw)
+  lsm303AccelData_ms2 accelData_ms2;  // Last read accelerometer data will be available here (ms^2) 
+  lsm303MagData magData;              // Last read magnetometer data will be available here (Raw)
+  lsm303MagData magData_mT;           // Last read magnetometer data will be available here (microTeslas)
+  int16_t temperature;                // Last read temperature data will be available here (Raw)
+  lsm303MagGain magGain;
+  
+  void write8(byte address, byte reg, byte value);
+  byte read8(byte address, byte reg);
 
   private:
 };
